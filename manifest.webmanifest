@@ -1,0 +1,16 @@
+{
+  "name": "Moosgrotte",
+  "short_name": "Moosgrotte",
+  "description": "Führe Lumi durch sechs Höhlen, sammle Laternen und finde die Geheimgänge.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#0e0b17",
+  "theme_color": "#0e0b17",
+  "icons": [
+    {"src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}
