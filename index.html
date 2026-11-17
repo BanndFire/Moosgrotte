@@ -243,7 +243,7 @@ body.is-fs .fs .shrink{display:block}
           <div class="box">
             <h3>Rangliste</h3>
             <div class="chips" id="lbLvl" role="group" aria-label="Ebene"></div>
-            <div class="seg" role="group" aria-label="Wertung" style="align-self:flex-start"><button id="lbT" aria-pressed="true">Schnellste Zeit</button><button id="lbF" aria-pressed="false">Alle Laternen</button></div>
+            <p class="muted">Schnellste Zeit, aber nur wenn du in diesem Durchgang alle Laternen gesammelt hast.</p>
             <table class="board"><tbody id="lbBody"></tbody></table>
             <p class="muted" id="lbMe"></p>
           </div>
@@ -884,6 +884,7 @@ function updatePlay() {
   }
   if (L.door && overlap(p, L.door.x + 6, L.door.y - T + 6, 20, 58)) {
     state = 'clear'; clearT = 120; sfx.win(); burst(L.door.x + 16, L.door.y, 30, '#9cf08a', 3.5, 45);
+    if (NET.status === 'on' && NET.name) toast(lanternsNow() >= L.lanterns.length ? 'Alle Laternen! Deine Zeit zählt für die Rangliste' : 'Für die Rangliste brauchst du alle Laternen');
   }
   time++;
 }
@@ -1249,7 +1250,8 @@ function render() {
   drawHUD();
   if (toastT > 0) {
     ctx.globalAlpha = Math.min(1, toastT / 30);
-    ctx.fillStyle = 'rgba(8,5,16,.75)'; ctx.fillRect(VW/2 - 130, 56, 260, 34);
+    ctx.font = `500 17px ${BODY}`; const tw = Math.max(260, ctx.measureText(toastMsg).width + 36);
+    ctx.fillStyle = 'rgba(8,5,16,.75)'; ctx.fillRect(VW/2 - tw/2, 56, tw, 34);
     small(toastMsg, VW/2, 73, 17, '#cdaeff');
     ctx.globalAlpha = 1;
   }
@@ -1364,7 +1366,7 @@ for (const [id, k] of [['setTouch', 'touch'], ['setSize', 'size'], ['setSound', 
 applyPrefs();
 
 /* ---------- Online (Firebase) ---------- */
-const NET = {status: 'off', uid: null, name: null, db: null, room: null, peers: {}, connected: false, lbLvl: 0, lbMode: 't'};
+const NET = {status: 'off', uid: null, name: null, db: null, room: null, peers: {}, connected: false, lbLvl: 0};
 const FB = 'https://www.gstatic.com/firebasejs/10.12.2/';
 const NAME_RE = /^[A-Za-z0-9_-]{3,16}$/;
 const ghosts = {};
@@ -1550,12 +1552,11 @@ function renderBoard() {
     b.addEventListener('click', () => { NET.lbLvl = i; renderBoard(); }); chips.appendChild(b);
   });
   [...chips.children].forEach((b, i) => b.setAttribute('aria-pressed', i === NET.lbLvl));
-  $('lbT').setAttribute('aria-pressed', NET.lbMode === 't'); $('lbF').setAttribute('aria-pressed', NET.lbMode === 'f');
   loadBoard();
 }
 async function loadBoard() {
-  const seq = ++lbSeq, lvl = NET.lbLvl, mode = NET.lbMode, body = $('lbBody');
-  body.innerHTML = '<tr><td></td><td class="muted">Lade …</td><td></td><td></td></tr>';
+  const seq = ++lbSeq, lvl = NET.lbLvl, mode = 'f', body = $('lbBody');
+  body.innerHTML = '<tr><td></td><td class="muted">Lade …</td><td></td></tr>';
   $('lbMe').textContent = '';
   try {
     const [snap, mine] = await withTimeout(Promise.all([
@@ -1566,31 +1567,27 @@ async function loadBoard() {
     snap.forEach(c => { rows.push({uid: c.key, ...c.val()}); });
     rows.sort((a, b) => a[mode] - b[mode]);
     body.innerHTML = '';
-    if (!rows.length) body.innerHTML = `<tr><td></td><td class="muted">${mode === 'f' ? 'Noch niemand hat hier alle Laternen geholt.' : 'Noch keine Zeiten. Sei die oder der Erste!'}</td><td></td><td></td></tr>`;
+    if (!rows.length) body.innerHTML = '<tr><td></td><td class="muted">Noch niemand hat hier alle Laternen geholt. Sei die oder der Erste!</td><td></td></tr>';
     rows.forEach((r, i) => {
       const tr = document.createElement('tr'); if (r.uid === NET.uid) tr.className = 'me';
-      const cells = [i + 1, r.name || '?', `${r.lan}/${r.total}${r.lan >= r.total ? ' ✓' : ''}`, fmt(r[mode])];
+      const cells = [i + 1, r.name || '?', fmt(r[mode])];
       cells.forEach((c, j) => { const td = document.createElement('td'); td.textContent = c; if (j > 1) td.className = 'num'; tr.appendChild(td); });
       body.appendChild(tr);
     });
     const m = mine.val();
-    $('lbMe').textContent = !m ? 'Du hast diese Ebene noch nicht geschafft.'
-      : `Deine Bestzeit: ${fmt(m.t)}` + (m.f ? ` · mit allen Laternen: ${fmt(m.f)}` : ` · Laternen: ${m.lan}/${m.total}`);
+    $('lbMe').textContent = m && m.f ? `Deine Bestzeit: ${fmt(m.f)}` : 'Du hast diese Ebene noch nicht mit allen Laternen geschafft.';
   } catch (e) {
-    if (seq === lbSeq) body.innerHTML = '<tr><td></td><td class="muted">Rangliste konnte nicht geladen werden.</td><td></td><td></td></tr>';
+    if (seq === lbSeq) body.innerHTML = '<tr><td></td><td class="muted">Rangliste konnte nicht geladen werden.</td><td></td></tr>';
   }
 }
-$('lbT').addEventListener('click', () => { NET.lbMode = 't'; renderBoard(); });
-$('lbF').addEventListener('click', () => { NET.lbMode = 'f'; renderBoard(); });
 async function netScore(lvl, t, lan, total) {
-  if (NET.status !== 'on' || !NET.name) return;
+  // lan = Laternen aus genau diesem Durchgang (jeder Start einer Ebene zählt neu)
+  if (NET.status !== 'on' || !NET.name || lan < total) return;
   try {
     const ref = NET.db.ref(`scores/${lvl}/${NET.uid}`), cur = (await ref.get()).val() || {};
-    const full = lan >= total;
-    const next = {name: NET.name, total, t: cur.t ? Math.min(cur.t, t) : t, lan: Math.max(cur.lan || 0, lan)};
-    const f = full ? (cur.f ? Math.min(cur.f, t) : t) : cur.f;
-    if (f) next.f = f;
-    if (next.t !== cur.t || next.f !== cur.f || next.lan !== cur.lan || cur.name !== NET.name || cur.total !== total) await ref.set(next);
+    const best = cur.f ? Math.min(cur.f, t) : t;
+    if (best !== cur.f || cur.name !== NET.name || cur.total !== total)
+      await ref.set({name: NET.name, total, lan: total, t: best, f: best});
   } catch (e) { console.warn('Zeit nicht gespeichert', e); }
 }
 
