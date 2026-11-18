@@ -181,3 +181,8 @@ body.is-fs .fs .shrink{display:block}
 
 /* Auf der 3D-Karte braucht es keinen Dash-Knopf */
 body.in-world #tDash{display:none}
+
+/* Haus-Knopf (Übersicht) links neben dem Zahnrad */
+#homeBtn{right:calc(1.3*var(--u) + clamp(30px,calc(5.4*var(--u)),48px) + 8px)}
+#homeBtn:hover{transform:none}
+.tabs{padding-right:calc(14*var(--u) + 24px)}

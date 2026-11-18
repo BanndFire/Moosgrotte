@@ -4,9 +4,12 @@
 
 /* ---------- Menü ---------- */
 const menu = $('menu');
+// Der Name der Spielfigur: dein Username, sonst "Lumi"
+const heroName = () => (typeof NET !== 'undefined' && NET.name) || 'Lumi';
 const TABS = {home: ['tabHome', 'viewHome'], online: ['tabOnline', 'viewOnline'], set: ['tabSet', 'viewSet']};
 function setTab(t) {
   for (const k in TABS) { $(TABS[k][0]).setAttribute('aria-selected', k === t); $(TABS[k][1]).hidden = k !== t; }
+  if (t === 'home') $('tagline').textContent = `${heroName()}, das Glutwesen, wandert von den Sonnenwiesen bis tief in die Moosgrotte.`;
   if (t === 'online') renderOnline();
   if (t === 'set') renderSettings();
 }
@@ -15,14 +18,12 @@ function openMenu(t) {
   $('resume').textContent = inLevel ? 'Weiterspielen' : 'Zur Karte';
   document.body.classList.add('menu-open'); if (typeof netPresence === 'function') netPresence(true); if (typeof padReset === 'function') padReset();
   for (const id of ['tJump', 'tDash']) $(id).classList.remove('on');
-  $('gear').setAttribute('aria-label', inLevel ? 'Menü schließen' : 'Menü');
   for (const k in key) key[k] = false;
   setTab(t);
 }
 function closeMenu() {
   if (!inLevel && state !== 'world') return;
   menuOpen = false; menu.hidden = true; document.body.classList.remove('menu-open'); $('swatches').hidden = true; $('skinBtn').setAttribute('aria-expanded', 'false');
-  $('gear').setAttribute('aria-label', 'Menü öffnen');
   if (state === 'pause') state = 'play';
   cv.focus({preventScroll: true});
 }
@@ -33,7 +34,14 @@ $('tabSet').addEventListener('click', () => setTab('set'));
 $('resume').addEventListener('click', closeMenu);
 $('restart').addEventListener('click', () => { loadLevel(li); time = 0; deaths = 0; state = 'play'; closeMenu(); });
 $('playBtn').addEventListener('click', () => { initAudio(); enterWorld(inLevel ? li : WL.node); });
-$('gear').addEventListener('click', () => { initAudio(); if (menuOpen) closeMenu(); else openMenu('home'); });
+// Zahnrad = Einstellungen, Haus = Übersicht. Nochmal drücken schliesst das Menü.
+function toggleMenu(t) {
+  initAudio();
+  const cur = Object.keys(TABS).find(k => !$(TABS[k][1]).hidden);
+  if (menuOpen && cur === t && (inLevel || state === 'world')) closeMenu(); else openMenu(t);
+}
+$('gear').addEventListener('click', () => toggleMenu('set'));
+$('homeBtn').addEventListener('click', () => toggleMenu('home'));
 const sw = $('swatches');
 SKINS.forEach((s, i) => {
   const b = document.createElement('button');

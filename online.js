@@ -197,8 +197,8 @@ async function loadBoard() {
   $('lbMe').textContent = '';
   try {
     const [snap, mine] = await withTimeout(Promise.all([
-      NET.db.ref('scores/' + lvl).orderByChild(mode).startAt(1).limitToFirst(10).get(),
-      NET.db.ref(`scores/${lvl}/${NET.uid}`).get()]), 10000);
+      NET.db.ref('scores/' + LEVELS[lvl].id).orderByChild(mode).startAt(1).limitToFirst(10).get(),
+      NET.db.ref(`scores/${LEVELS[lvl].id}/${NET.uid}`).get()]), 10000);
     if (seq !== lbSeq) return;
     const rows = [];
     snap.forEach(c => { rows.push({uid: c.key, ...c.val()}); });
@@ -221,7 +221,7 @@ async function netScore(lvl, t, lan, total) {
   // lan = Laternen aus genau diesem Durchgang (jeder Start einer Ebene zählt neu)
   if (NET.status !== 'on' || !NET.name || lan < total) return;
   try {
-    const ref = NET.db.ref(`scores/${lvl}/${NET.uid}`), cur = (await ref.get()).val() || {};
+    const ref = NET.db.ref(`scores/${LEVELS[lvl].id}/${NET.uid}`), cur = (await ref.get()).val() || {};
     const best = cur.f ? Math.min(cur.f, t) : t;
     if (best !== cur.f || cur.name !== NET.name || cur.total !== total)
       await ref.set({name: NET.name, total, lan: total, t: best, f: best});

@@ -2,16 +2,32 @@
    spiel.js – Spielablauf: Speicherstand, Zustand, Tastatur, Ton und Physik (laufen, springen, dashen, Gegner …)
    ============================================================ */
 
-/* ---------- Speicherstand ---------- */
-// v3: 6 Ebenen und weniger Laternen. Freigeschaltete Ebenen und Skin aus v2 werden übernommen, alte Bestwerte nicht.
+/* ---------- Speicherstand ----------
+   Gespeichert wird pro Ebenen-ID (siehe levels.js). So bleibt der Fortschritt erhalten,
+   auch wenn neue Ebenen dazukommen. Ältere Speicherstände werden übernommen. */
 const N = LEVELS.length;
-let save = {done: Array(N).fill(false), best: Array(N).fill(null), skin: 2};
+const idIndex = id => LEVELS.findIndex(d => d.id === String(id));
+let save = {done: Array(N).fill(false), best: Array(N).fill(null), skin: 2, at: 0};
 try {
-  const s = JSON.parse(localStorage.getItem('moosgrotte-v3') || 'null');
-  if (s) save = {done: Array.from({length: N}, (_, i) => !!(s.done || [])[i]), best: Array.from({length: N}, (_, i) => (s.best || [])[i] || null), skin: s.skin ?? 2, at: s.at || 0};
-  else { const o = JSON.parse(localStorage.getItem('moosgrotte-v2') || 'null'); if (o) { (o.done || []).forEach((d, i) => { if (i < N) save.done[i] = !!d; }); save.skin = o.skin ?? 2; } }
+  const s4 = JSON.parse(localStorage.getItem('moosgrotte-v4') || 'null');
+  if (s4) {
+    for (const id in s4.lv || {}) { const i = idIndex(id); if (i >= 0) { save.done[i] = !!s4.lv[id].done; save.best[i] = s4.lv[id].best || null; } }
+    save.skin = s4.skin ?? 2; save.at = Math.max(0, idIndex(s4.at));
+  } else {
+    // alte Stände hatten nur die 6 Höhlen, gezählt ab 0
+    const s3 = JSON.parse(localStorage.getItem('moosgrotte-v3') || 'null'), s2 = JSON.parse(localStorage.getItem('moosgrotte-v2') || 'null'), o = s3 || s2;
+    if (o) {
+      (o.done || []).forEach((d, k) => { const i = idIndex(k); if (i >= 0) save.done[i] = !!d; });
+      if (s3) (s3.best || []).forEach((b, k) => { const i = idIndex(k); if (i >= 0) save.best[i] = b || null; });
+      save.skin = o.skin ?? 2;
+    }
+  }
 } catch (e) {}
-function persist() { try { localStorage.setItem('moosgrotte-v3', JSON.stringify(save)); } catch (e) {} }
+function persist() {
+  const lv = {};
+  LEVELS.forEach((d, i) => { if (save.done[i] || save.best[i]) lv[d.id] = {done: save.done[i], best: save.best[i]}; });
+  try { localStorage.setItem('moosgrotte-v4', JSON.stringify({lv, skin: save.skin, at: (LEVELS[save.at] || LEVELS[0]).id})); } catch (e) {}
+}
 const skin = () => SKINS[save.skin] || SKINS[2];
 
 /* ---------- Zustand ---------- */
@@ -29,6 +45,7 @@ function placePlayer() {
   trail.length = 0;
   for (const e of L.enemies) Object.assign(e, {x: e.sx, y: e.sy, vx: 0, vy: 0, dir: -1, alive: true});
   for (const g of L.crumbles) Object.assign(g, {solid: true, timer: 0, gone: 0, touched: false});
+  if (L.boss) resetBoss();
 }
 function startLevel(i) {
   loadLevel(i); time = 0; deaths = 0; state = 'play'; inLevel = true; closeMenu(); cv.focus({preventScroll: true});
@@ -153,6 +170,57 @@ function updateCrumbles() {
   }
 }
 
+/* ---------- Boss ----------
+   Auf den Boss springen = Treffer. Ihn sonst berühren = verloren.
+   Zwischenboss: 3 Treffer. Endboss: 5 Treffer, springt, wird nach jedem Treffer wütend und schneller. */
+let shake = 0, fadeT = 0;
+function resetBoss() {
+  Object.assign(L.boss, {x: L.boss.sx, y: L.boss.sy, vx: 0, vy: 0, dir: -1, hp: L.boss.max, inv: 0, rage: 0, jt: 90, wait: 70, dying: 0, ground: false, hitWall: false});
+}
+function enterArena() {
+  const a = L.arena;
+  L.inArena = true; fadeT = 26;
+  respawn = {x: a.x0 + 24, y: a.y1 - P.h};
+  placePlayer(); P.face = 1; updateCam(true);
+  tone('sawtooth', 140, 60, 0.5, 0.06);
+}
+function updateBoss() {
+  const b = L.boss, p = P, big = b.kind === 'big';
+  if (b.dying > 0) {
+    if (b.dying % 9 === 0) burst(b.x + Math.random() * b.w, b.y + Math.random() * b.h, 10, big ? '#c4b3ff' : '#9a8de0', 3, 30);
+    if (--b.dying === 0) { state = 'clear'; clearT = 160; sfx.win(); burst(b.x + b.w / 2, b.y + b.h / 2, 40, '#ffd36b', 4, 50); }
+    return;
+  }
+  if (b.wait > 0) { b.wait--; if (b.wait === 30) { shake = 10; tone('sawtooth', 90, 50, 0.4, 0.07); } }
+  else {
+    const dmg = b.max - b.hp;
+    let sp = (big ? 1.5 : 1.1) + dmg * (big ? 0.4 : 0.45);
+    if (b.rage > 0) { b.rage--; sp *= 1.8; }
+    b.vx = b.dir * sp; moveX(b); if (b.hitWall) b.dir *= -1;
+    if (b.ground && --b.jt <= 0) {
+      b.vy = big ? -11.5 : -7.5; b.jt = (big ? 110 : 170) - dmg * 14;
+      if (big) b.dir = p.x + p.w / 2 > b.x + b.w / 2 ? 1 : -1;   // Endboss springt auf dich zu
+    }
+  }
+  const air = !b.ground;
+  b.vy = Math.min(b.vy + GRAV, 12); moveY(b);
+  if (air && b.ground && big && b.wait <= 0) { shake = 12; burst(b.x + b.w / 2, b.y + b.h, 14, '#8b7fae', 2.5, 24); tone('square', 90, 40, 0.2, 0.06); }
+  if (b.inv > 0) b.inv--;
+  if (overlap(p, b.x + 5, b.y + 6, b.w - 10, b.h - 6)) {
+    const fromAbove = p.vy > 0 && p.y + p.h - b.y < 24;
+    if (fromAbove) {
+      p.vy = key.jump ? -12 : -9.5; p.dashT = 0; p.canDash = true; p.ground = false; p.ride = null;
+      if (b.inv <= 0) {
+        b.hp--; b.inv = 60; shake = 8; sfx.stomp(); tone('square', 600, 200, 0.2, 0.06);
+        burst(b.x + b.w / 2, b.y + 8, 18, '#ffd36b', 3, 28);
+        b.dir = p.x + p.w / 2 > b.x + b.w / 2 ? -1 : 1;        // flieht kurz
+        if (big) b.rage = 100;
+        if (b.hp <= 0) { b.dying = 110; toast(`${b.name} ist besiegt!`); }
+      }
+    } else die();
+  }
+}
+
 function updatePlay() {
   const p = P, wasG = p.ground, fallV = p.vy;
   updatePlats();
@@ -196,6 +264,10 @@ function updatePlay() {
   }
   if (p.ride) { p.x += p.ride.dx; p.y += p.ride.dy; }
   moveX(p);
+  if (L.inArena) {   // im Bossraum: nicht aus dem Bild laufen
+    if (p.x < L.arena.x0) { p.x = L.arena.x0; p.vx = 0; }
+    if (p.x + p.w > L.arena.x1) { p.x = L.arena.x1 - p.w; p.vx = 0; }
+  }
   const prevB = p.y + p.h;
   moveY(p);
   p.ride = null;
@@ -250,6 +322,8 @@ function updatePlay() {
       } else { die(); return; }
     }
   }
+  if (L.bossDoor && !L.inArena && overlap(p, L.bossDoor.x - 6, L.bossDoor.y - T + 4, 12, 2 * T - 4)) { enterArena(); return; }
+  if (L.boss && L.inArena) { updateBoss(); if (state !== 'play') return; }
   for (const s of L.lanterns) if (!s.got && Math.abs(p.x + p.w/2 - s.x) < 18 && Math.abs(p.y + p.h/2 - s.y) < 22) {
     s.got = true; sfx.lantern(); burst(s.x, s.y, 12, '#ffd27a', 2.2, 24);
   }
@@ -263,9 +337,17 @@ function updatePlay() {
   time++;
 }
 function updateCam(snap) {
-  const tx = clamp(P.x + P.w/2 - VW/2 + P.face * 40, 0, L.w*T - VW);
-  const ty = clamp(P.y + P.h/2 - VH/2 + 20, 0, LH*T - VH);
-  cam.x += (tx - cam.x) * (snap ? 1 : 0.1); cam.y += (ty - cam.y) * (snap ? 1 : 0.1);
+  let tx, ty, k = snap ? 1 : 0.1;
+  if (L.inArena) {
+    // Bossraum: Kamera bleibt stehen
+    const a = L.arena;
+    tx = (a.x0 + a.x1) / 2 - VW / 2; ty = clamp((a.y0 + a.y1 + T) / 2 - VH / 2, 0, LH * T - VH); k = snap ? 1 : 0.2;
+  } else {
+    tx = clamp(P.x + P.w/2 - VW/2 + P.face * 40, 0, L.w*T - VW);
+    ty = clamp(P.y + P.h/2 - VH/2 + 20, 0, LH*T - VH);
+  }
+  cam.x += (tx - cam.x) * k; cam.y += (ty - cam.y) * k;
+  if (shake > 0) { shake--; cam.x += (Math.random() - 0.5) * shake; cam.y += (Math.random() - 0.5) * shake; }
 }
 function finishLevel() {
   const lan = lanternsNow(), b = save.best[li];
@@ -287,5 +369,6 @@ function update() {
   for (let i = parts.length - 1; i >= 0; i--) { const q = parts[i]; q.x += q.vx; q.y += q.vy; q.vy += 0.12; q.vx *= 0.97; if (--q.life <= 0) parts.splice(i, 1); }
   for (let i = trail.length - 1; i >= 0; i--) if (--trail[i].life <= 0) trail.splice(i, 1);
   if (toastT > 0) toastT--;
+  if (fadeT > 0) fadeT--;
   pressed.jump = false; pressed.dash = false;
 }

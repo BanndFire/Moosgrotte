@@ -8,6 +8,7 @@
    - Läuft Lumi auf den Anfang eines Pfads, wandert sie von selbst bis zum nächsten Knopf.
    - Auf dem Knopf startet SPRUNG / Leertaste / Enter die Ebene.
    Neue Ebenen in levels.js bekommen automatisch einen eigenen Knopf auf der Karte.
+   Ebenen mit Himmel (sky) liegen an der Oberfläche, danach geht es durch einen Eingang in die Höhlen.
    ============================================================ */
 
 const WORLD = {
@@ -18,7 +19,7 @@ const WORLD = {
   freeSpeed: 0.06,    // Tempo auf dem Platz
   revealSecs: 2.6,    // so lange dauert es, bis ein neuer Pfad ganz sichtbar ist
   depth: 26,          // Tiefe des Geländes
-  heights: [0.6, 1.7, 1.0, 2.4, 1.6, 3.0],   // Höhe der Plätze, wiederholt sich bei mehr Ebenen
+  heights: [0.6, 1.4, 1.0, 1.9, 1.3, 2.2],   // Höhe der Plätze, wiederholt sich bei mehr Ebenen
 };
 const W = {built: false, nodes: [], paths: [], decor: [], flies: [], hm: null, near: null, quads: null, hw: 0, hd: 0, w: 0, d: WORLD.depth};
 const WL = {x: 0, z: 0, y: 0, node: 0, mode: 'free', path: -1, dir: 1, s: 0, face: 1, walk: 0, vx: 0, vz: 0};
@@ -55,7 +56,7 @@ function buildWorld() {
   W.nodes = LEVELS.map((d, i) => {
     const th = THEMES[d.theme] || THEMES.moss;
     if (!th.rgb) th.rgb = {top: hex2rgb(th.top), stone: hex2rgb(th.stone), light: hex2rgb(th.light), deep: hex2rgb(th.deep), blade: hex2rgb(th.blade), hi: hex2rgb(th.topHi)};
-    return {x: 6 + i * 9.5, z: i % 2 ? 16 : 9.5, h: WORLD.heights[i % WORLD.heights.length] + Math.floor(i / WORLD.heights.length) * 0.7, th};
+    return {x: 6 + i * 9.5, z: i % 2 ? 16 : 9.5, h: WORLD.heights[i % WORLD.heights.length] + Math.floor(i / WORLD.heights.length) * 0.5, th, sky: !!th.sky, boss: d.boss};
   });
   W.w = W.nodes[n - 1].x + 8; W.hw = Math.ceil(W.w) + 1; W.hd = W.d + 1;
 
@@ -73,7 +74,7 @@ function buildWorld() {
       if (k) s += Math.hypot(q.x - pts[k - 1].x, q.z - pts[k - 1].z);
       q.s = s; pts.push(q);
     }
-    W.paths.push({a: i, b: i + 1, pts, len: s, h0: a.h, h1: b.h, stones: []});
+    W.paths.push({a: i, b: i + 1, pts, len: s, h0: a.h, h1: b.h, stones: [], minx: Math.min(...pts.map(q => q.x)) - 3, maxx: Math.max(...pts.map(q => q.x)) + 3});
   }
 
   // Höhenkarte: sanfte Hügel, Felsen hinten, flache Plätze und Pfade
@@ -86,7 +87,7 @@ function buildWorld() {
     if (x > W.w - 2.5) h += (x - (W.w - 2.5)) * 1.4;
     if (z < 2) h -= (2 - z) * 1.2;
     let best = 99, bh = 0;
-    for (const p of W.paths) for (let k = 0; k < p.pts.length; k += 3) {
+    for (const p of W.paths) if (x >= p.minx && x <= p.maxx) for (let k = 0; k < p.pts.length; k += 3) {
       const q = p.pts[k], d = Math.hypot(q.x - x, q.z - z);
       if (d < best) { best = d; bh = p.h0 + (p.h1 - p.h0) * smooth(0, 1, q.s / p.len); }
     }
@@ -136,9 +137,14 @@ function buildWorld() {
     if (W.near[iz * W.hw + ix] < 1.3) continue;
     if (W.nodes.some(nd => Math.hypot(nd.x - x, nd.z - z) < WORLD.plaza + 0.8)) continue;
     const [zk, zt] = zoneAt(x), nd = W.nodes[zt > 0.5 ? Math.min(zk + 1, n - 1) : zk];
-    const type = k > 0.965 && z > 14 ? 'spire' : nd.th.decor[Math.floor(hash(ix * 3, iz * 11) * nd.th.decor.length)];
+    const type = k > 0.965 && z > 14 && !nd.sky ? 'spire' : k > 0.93 && nd.sky && !nd.th.brick ? 'tree' : nd.th.decor[Math.floor(hash(ix * 3, iz * 11) * nd.th.decor.length)];
     W.decor.push({x, z, y: heightAt(x, z), type, k, th: nd.th, big: 1.3 + hash(iz, ix * 2) * 1.2});
   }
+  // Wo endet die Oberfläche? Dort steht der Höhleneingang.
+  const fc = W.nodes.findIndex(nd => !nd.sky);
+  W.caveAt = fc > 0 ? W.paths[fc - 1] : null;
+  W.skyFrom = fc > 0 ? W.nodes[fc - 1].x + 2 : -1e9; W.skyTo = fc > 0 ? W.nodes[fc].x - 2 : -1e9 + 1;
+  if (fc < 0) { W.skyFrom = 1e9; W.skyTo = 1e9 + 1; }
   W.flies = Array.from({length: 34}, (_, i) => ({x: 3 + hash(i, 21) * (W.w - 6), z: 3 + hash(21, i) * (W.d - 9), p: hash(i, 5) * 6, c: W.nodes[zoneAt(3 + hash(i, 21) * (W.w - 6))[0]].th.spore}));
   W.built = true;
 }
@@ -288,6 +294,38 @@ function drawSpire(q, th, big) {
   ctx.fillStyle = th.light; ctx.beginPath(); ctx.moveTo(q.x - w, q.y); ctx.lineTo(q.x + w * 0.2, q.y - h); ctx.lineTo(q.x - w * 0.15, q.y); ctx.fill();
   ctx.fillStyle = th.deep; ctx.beginPath(); ctx.ellipse(q.x, q.y, w, w * 0.25, 0, 0, Math.PI); ctx.fill();
 }
+function drawCastle(nd) {
+  // kleine Burg hinter dem Knopf einer Boss-Ebene
+  const q = wproj(nd.x + 0.2, nd.h, nd.z + 3, {});
+  if (!q.ok) return;
+  const th = nd.th, u = q.s, big = nd.boss === 'big' ? 1.25 : 1, w = 3.4 * u * big, h = 1.5 * u * big, tw = 0.9 * u * big, tH = 2.5 * u * big;
+  ctx.fillStyle = th.stone; ctx.fillRect(q.x - w / 2, q.y - h, w, h);
+  for (let x = -w / 2; x < w / 2 - 0.2 * u; x += 0.45 * u) ctx.fillRect(q.x + x, q.y - h - 0.22 * u, 0.25 * u, 0.22 * u);
+  for (const sx of [-1, 1]) {
+    const x = q.x + sx * (w / 2) - tw / 2;
+    ctx.fillStyle = th.light; ctx.fillRect(x, q.y - tH, tw, tH);
+    ctx.fillStyle = th.roof || '#b04a4a'; ctx.beginPath(); ctx.moveTo(x - 0.12 * u, q.y - tH); ctx.lineTo(x + tw / 2, q.y - tH - 1.0 * u * big); ctx.lineTo(x + tw + 0.12 * u, q.y - tH); ctx.fill();
+    ctx.fillStyle = th.deep; ctx.fillRect(x + tw * 0.4, q.y - tH * 0.7, tw * 0.2, tH * 0.18);
+  }
+  ctx.fillStyle = '#1a1020'; ctx.beginPath(); ctx.moveTo(q.x - 0.45 * u, q.y); ctx.lineTo(q.x - 0.45 * u, q.y - 0.7 * u); ctx.arc(q.x, q.y - 0.7 * u, 0.45 * u, Math.PI, 0); ctx.lineTo(q.x + 0.45 * u, q.y); ctx.fill();
+  const fw = Math.sin(tick * 0.06) * 0.08 * u;
+  ctx.fillStyle = '#6b5a4a'; ctx.fillRect(q.x - 0.03 * u, q.y - h - 1.4 * u, 0.06 * u, 1.2 * u);
+  ctx.fillStyle = th.roof || '#c0392b'; ctx.beginPath(); ctx.moveTo(q.x, q.y - h - 1.4 * u); ctx.lineTo(q.x + 0.7 * u + fw, q.y - h - 1.25 * u); ctx.lineTo(q.x, q.y - h - 1.05 * u); ctx.fill();
+}
+function drawCaveMouth(p) {
+  // Felsen mit dunklem Eingang: hier geht es von der Oberfläche in die Höhlen
+  const m = pointAt(p, p.len * 0.5), y = heightAt(m.x, m.z), q = wproj(m.x, y, m.z + 0.6, {});
+  if (!q.ok) return;
+  const u = q.s, th = W.nodes[p.b].th;
+  ctx.fillStyle = th.stone; ctx.beginPath(); ctx.moveTo(q.x - 3.2 * u, q.y + 0.2 * u);
+  ctx.quadraticCurveTo(q.x - 3 * u, q.y - 3.6 * u, q.x - 0.4 * u, q.y - 3.9 * u); ctx.quadraticCurveTo(q.x + 2.6 * u, q.y - 4.1 * u, q.x + 3.3 * u, q.y + 0.2 * u); ctx.fill();
+  ctx.fillStyle = th.light; ctx.beginPath(); ctx.moveTo(q.x - 3.2 * u, q.y + 0.2 * u); ctx.quadraticCurveTo(q.x - 3 * u, q.y - 3.6 * u, q.x - 0.4 * u, q.y - 3.9 * u);
+  ctx.quadraticCurveTo(q.x - 2.2 * u, q.y - 3 * u, q.x - 2.2 * u, q.y + 0.2 * u); ctx.fill();
+  const g = ctx.createLinearGradient(0, q.y - 2.2 * u, 0, q.y); g.addColorStop(0, '#05030a'); g.addColorStop(1, '#1a1228');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(q.x - 1.2 * u, q.y + 0.2 * u); ctx.lineTo(q.x - 1.2 * u, q.y - 1.4 * u); ctx.arc(q.x, q.y - 1.4 * u, 1.2 * u, Math.PI, 0); ctx.lineTo(q.x + 1.2 * u, q.y + 0.2 * u); ctx.fill();
+  ctx.fillStyle = W.nodes[p.a].th.blade;
+  for (let i = 0; i < 9; i++) ctx.fillRect(q.x - 2.8 * u + i * 0.65 * u, q.y - 3.75 * u + Math.abs(i - 4) * 0.12 * u - (i % 2) * 0.1 * u, 0.12 * u, 0.3 * u);
+}
 function drawWorldLumi() {
   const q = wproj(WL.x, WL.y, WL.z, {});
   if (!q.ok) return;
@@ -298,11 +336,22 @@ function drawWorldLumi() {
   drawLumi(ctx, 0, 0, {sx: 1, sy: 1, face: WL.face, walk: WL.walk, ground: true, dim: false});
   ctx.restore();
 }
-function drawWorldBG() {
+const mixc = (a, b, t) => `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * t)).join(',')})`;
+function drawWorldBG(sky) {
   const g = ctx.createLinearGradient(0, 0, 0, VH);
-  g.addColorStop(0, '#04030a'); g.addColorStop(1, '#151027');
+  g.addColorStop(0, mixc([4, 3, 10], [95, 180, 255], sky)); g.addColorStop(1, mixc([21, 16, 39], [214, 241, 255], sky));
   ctx.fillStyle = g; ctx.fillRect(0, 0, VW, VH);
-  // hängende Tropfsteine ganz hinten
+  if (sky > 0.02) {
+    ctx.globalAlpha = sky;
+    for (let i = 0; i < 6; i++) {
+      const w = 70 + hash(i, 50) * 80, span = VW + 400, x = ((hash(50, i) * span - WCAM.x * 6 + tick * 0.15) % span + span) % span - 200, y = 18 + hash(i, 51) * 60;
+      ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.beginPath(); ctx.ellipse(x, y, w * 0.5, w * 0.16, 0, 0, 7); ctx.ellipse(x + w * 0.12, y - w * 0.08, w * 0.24, w * 0.17, 0, 0, 7); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+  if (sky > 0.98) return;
+  // hängende Tropfsteine ganz hinten (nur in den Höhlen)
+  ctx.globalAlpha = 1 - sky;
   ctx.fillStyle = '#0d0a1a';
   const off = -(WCAM.x * 9) % 1200;
   for (const k of [0, 1200]) for (let i = 0; i < 26; i++) {
@@ -310,13 +359,15 @@ function drawWorldBG() {
     if (x > VW + 60 || x < -60) continue;
     ctx.beginPath(); ctx.moveTo(x - w, 0); ctx.lineTo(x + w, 0); ctx.lineTo(x, h); ctx.fill();
   }
+  ctx.globalAlpha = 1;
 }
 function renderWorld() {
   ctx.setTransform(S, 0, 0, S, 0, 0); ctx.imageSmoothingEnabled = true;
   if (!W.built) buildWorld();
   wF = VH * 1.25; wSin = Math.sin(PITCH); wCos = Math.cos(PITCH);
   WCAM.x = WCAM.tx; WCAM.y = WCAM.ty + CAM_UP; WCAM.z = WCAM.tz - CAM_BACK;
-  drawWorldBG();
+  const sky = 1 - smooth(W.skyFrom, W.skyTo, WCAM.tx);   // 1 = Oberfläche, 0 = Höhle
+  drawWorldBG(sky);
 
   const zMin = Math.max(0, Math.floor(WCAM.z + 1)), zMax = Math.min(W.d - 1, Math.ceil(WCAM.z + 36));
   // Gitterpunkte projizieren
@@ -331,7 +382,8 @@ function renderWorld() {
   // Was steht wo? Gegenstände nach Reihen sortieren, damit Näheres Entfernteres verdeckt
   const rows = [];
   const put = (z, fn, zs = z) => { const r = Math.floor(z); if (r < zMin || r > zMax) return; (rows[r] || (rows[r] = [])).push({zs, fn}); };
-  W.nodes.forEach((nd, i) => put(nd.z - 1.25, () => drawPad(i), nd.z));
+  W.nodes.forEach((nd, i) => { put(nd.z - 1.25, () => drawPad(i), nd.z); if (nd.boss) put(nd.z + 3, () => drawCastle(nd), nd.z + 3); });
+  if (W.caveAt) { const m = pointAt(W.caveAt, W.caveAt.len * 0.5); put(m.z + 0.6, () => drawCaveMouth(W.caveAt), m.z + 0.6); }
   W.paths.forEach((p, i) => {
     if (!save.done[i]) return;
     const show = reveal && reveal.path === i ? Math.floor(clamp(reveal.t, 0, 1) * p.stones.length) : p.stones.length;
@@ -341,7 +393,7 @@ function renderWorld() {
     const q = wproj(d.x, d.y, d.z, {});
     if (!q.ok) return;
     if (d.type === 'spire') return drawSpire(q, d.th, d.big * 0.5);
-    const sc = q.s / 32 * d.big; ctx.save(); ctx.translate(q.x, q.y); ctx.scale(sc, sc); drawDecor(d.type, -16, 0, d.k, d.th); ctx.restore();
+    const sc = q.s / 32 * d.big * (d.type === 'tree' ? 0.6 : d.type === 'torch' ? 0.7 : 1); ctx.save(); ctx.translate(q.x, q.y); ctx.scale(sc, sc); drawDecor(d.type, -16, 0, d.k, d.th); ctx.restore();
   });
   put(WL.z - 1.3, drawWorldLumi, WL.z - 1.31);   // Lumi nach dem Knopf zeichnen, auf dem sie steht
   for (const f of W.flies) {
@@ -356,7 +408,7 @@ function renderWorld() {
   }
 
   // Lichtquellen für die Geländefarben
-  const [sr, sg, sb] = skin().rgb, lights = [];
+  const [sr, sg, sb] = skin().rgb, lights = [], fogC = lerp3([14, 10, 28], [205, 232, 255], sky);
   W.nodes.forEach((nd, i) => { if (nodeOpen(i)) lights.push([nd.x, nd.z, ...(save.done[i] ? [127, 196, 106] : [255, 181, 71])]); });
   for (let iz = zMax; iz >= zMin; iz--) {
     const span = (iz - WCAM.z) * 0.9 + 3, x0 = Math.max(0, Math.floor(WCAM.x - span)), x1 = Math.min(hw - 2, Math.ceil(WCAM.x + span));
@@ -366,13 +418,13 @@ function renderWorld() {
       const o = (iz * (hw - 1) + ix) * 3, cx = ix + 0.5, cz = iz + 0.5;
       let r = W.quads[o], g = W.quads[o + 1], bl = W.quads[o + 2];
       const dl = (cx - WL.x) ** 2 + (cz - WL.z) ** 2;
-      if (dl < 30) { const gl = (1 - Math.sqrt(dl) / 5.5) ** 2 * 0.5; if (gl > 0) { r += sr * gl; g += sg * gl; bl += sb * gl; } }
+      if (dl < 30) { const gl = (1 - Math.sqrt(dl) / 5.5) ** 2 * 0.5 * (1 - sky * 0.7); if (gl > 0) { r += sr * gl; g += sg * gl; bl += sb * gl; } }
       for (const L2 of lights) {
         const dd = (cx - L2[0]) ** 2 + (cz - L2[1]) ** 2;
         if (dd < 16) { const gl = (1 - Math.sqrt(dd) / 4) ** 2 * 0.35; r += L2[2] * gl; g += L2[3] * gl; bl += L2[4] * gl; }
       }
-      const fz = (PX[a + 2] + PX[c + 2]) / 2, fog = smooth(12, 30, fz);
-      r = r * (1 - fog) + 14 * fog; g = g * (1 - fog) + 10 * fog; bl = bl * (1 - fog) + 28 * fog;
+      const fz = (PX[a + 2] + PX[c + 2]) / 2, fog = smooth(12 + sky * 4, 30 + sky * 6, fz);
+      r = r * (1 - fog) + fogC[0] * fog; g = g * (1 - fog) + fogC[1] * fog; bl = bl * (1 - fog) + fogC[2] * fog;
       const col = `rgb(${Math.min(255, r) | 0},${Math.min(255, g) | 0},${Math.min(255, bl) | 0})`;
       ctx.beginPath(); ctx.moveTo(PX[a], PX[a + 1]); ctx.lineTo(PX[b], PX[b + 1]); ctx.lineTo(PX[c], PX[c + 1]); ctx.lineTo(PX[d], PX[d + 1]); ctx.closePath();
       ctx.fillStyle = col; ctx.strokeStyle = col; ctx.lineWidth = 0.8; ctx.fill(); ctx.stroke();
@@ -386,22 +438,23 @@ function renderWorld() {
   if (q.ok) {
     ctx.save(); ctx.globalCompositeOperation = 'lighter';
     const gr = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, 3 * q.s);
-    gr.addColorStop(0, `rgba(${sr},${sg},${sb},.22)`); gr.addColorStop(1, `rgba(${sr},${sg},${sb},0)`);
+    gr.addColorStop(0, `rgba(${sr},${sg},${sb},${0.22 - sky * 0.14})`); gr.addColorStop(1, `rgba(${sr},${sg},${sb},0)`);
     ctx.fillStyle = gr; ctx.fillRect(q.x - 3 * q.s, q.y - 3 * q.s, 6 * q.s, 6 * q.s); ctx.restore();
   }
   const vg = ctx.createRadialGradient(VW / 2, VH * 0.55, VH * 0.35, VW / 2, VH * 0.55, VW * 0.75);
-  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.55)');
+  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, `rgba(0,0,0,${0.55 - sky * 0.4})`);
   ctx.fillStyle = vg; ctx.fillRect(0, 0, VW, VH);
   drawWorldHud();
 }
 function drawWorldHud() {
+  const sky = 1 - smooth(W.skyFrom, W.skyTo, WCAM.tx);
   const g = ctx.createLinearGradient(0, 0, 0, 46); g.addColorStop(0, 'rgba(6,4,14,.85)'); g.addColorStop(1, 'rgba(6,4,14,0)');
   ctx.fillStyle = g; ctx.fillRect(0, 0, VW, 46);
   small('Karte', 14, 18, 16, '#ffffff', 'left');
   let got = 0, all = 0;
   LEVELS.forEach((d, i) => { all += d.total; got += save.best[i] ? save.best[i].lan : 0; });
-  drawLantern(null, ctx, VW - 150, 19, 0.6);
-  small(`${got}/${all}`, VW - 140, 18, 16, '#ffe2a3', 'left');
+  drawLantern(null, ctx, VW - 200, 19, 0.6);
+  small(`${got}/${all}`, VW - 190, 18, 16, '#ffe2a3', 'left');
   if (NET.room) small(`Gruppe ${NET.room} · ${Object.keys(NET.peers).length} dabei`, 14, 38, 13, '#cdaeff', 'left');
   if (menuOpen) return;
   const touchOn = !document.body.classList.contains('no-touch');
@@ -411,13 +464,13 @@ function drawWorldHud() {
     ctx.fillStyle = 'rgba(8,5,16,.78)'; ctx.fillRect(VW / 2 - 175, 50, 350, 76);
     ctx.fillStyle = save.done[WL.node] ? '#7fc46a' : '#ffb547'; ctx.fillRect(VW / 2 - 175, 50, 350, 3);
     text(`${WL.node + 1} · ${d.name}`, VW / 2, 72, 22, save.done[WL.node] ? '#a8f597' : '#ffb547');
-    small(best ? `Bestzeit ${fmt(best.time)} · Laternen ${best.lan}/${d.total}` : `${d.total} Laternen warten auf dich`, VW / 2, 95, 14, '#d6cbff');
+    small((d.boss ? (d.boss === 'big' ? 'Endboss · ' : 'Zwischenboss · ') : '') + (best ? `Bestzeit ${fmt(best.time)} · Laternen ${best.lan}/${d.total}` : `${d.total} Laternen warten auf dich`), VW / 2, 95, 14, '#d6cbff');
     small(`${touchOn ? 'SPRUNG' : 'Leertaste'} zum Starten`, VW / 2, 114, 14, '#ffffff');
   } else if (!reveal && WL.mode === 'free' && !worldHint) {
     small(touchOn ? 'Mit dem Steuerkreuz läufst du über den Platz' : 'Mit den Pfeiltasten läufst du über den Platz', VW / 2, 66, 15, '#d6cbff');
   }
   if (!reveal && WL.mode === 'free' && !onPad && pathShown(WL.node) && worldHint)
-    small('Lauf auf den Pfad, dann geht Lumi von selbst weiter', VW / 2, VH - 22, 14, 'rgba(236,229,247,.75)');
+    small(`Lauf auf den Pfad, dann geht ${heroName()} von selbst weiter`, VW / 2, VH - 22, 14, sky > 0.5 ? 'rgba(20,30,40,.8)' : 'rgba(236,229,247,.75)');
   if (toastT > 0) {
     ctx.globalAlpha = Math.min(1, toastT / 30);
     ctx.font = `500 17px ${BODY}`; const tw = Math.max(260, ctx.measureText(toastMsg).width + 36);

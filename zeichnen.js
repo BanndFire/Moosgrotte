@@ -12,7 +12,61 @@ const BG = [0.15, 0.4].map((f, n) => {
 });
 const SPORES = Array.from({length: 60}, (_, i) => ({x: hash(i, 1) * 1301, y: hash(1, i) * 997, s: 0.2 + hash(i, 7) * 0.5, p: hash(i, 3) * 6}));
 
+function drawSky(th) {
+  // Himmel mit Sonne, Wolken und Hügeln (oder Burgtürmen) für die Oberfläche
+  const g = ctx.createLinearGradient(0, 0, 0, VH);
+  g.addColorStop(0, th.bg[0]); g.addColorStop(1, th.bg[1]);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, VW, VH);
+  const sx = VW * 0.78 - cam.x * 0.02, sy = 70 - cam.y * 0.05, sg = ctx.createRadialGradient(sx, sy, 0, sx, sy, 110);
+  sg.addColorStop(0, th.sun); sg.addColorStop(0.2, th.sun); sg.addColorStop(0.28, th.sun + '66'); sg.addColorStop(1, th.sun + '00');
+  ctx.fillStyle = sg; ctx.fillRect(sx - 110, sy - 110, 220, 220);
+  for (let i = 0; i < 8; i++) {
+    const w = 50 + hash(i, 40) * 70, span = VW + 400;
+    const x = ((hash(40, i) * span - cam.x * 0.06 + tick * 0.1 * (0.4 + hash(i, 41))) % span + span) % span - 200, y = 26 + hash(i, 42) * 100 - cam.y * 0.04;
+    ctx.fillStyle = th.dark ? 'rgba(255,200,190,.35)' : 'rgba(255,255,255,.8)';
+    ctx.beginPath(); ctx.ellipse(x, y, w * 0.5, w * 0.18, 0, 0, 7); ctx.ellipse(x - w * 0.22, y + 2, w * 0.28, w * 0.15, 0, 0, 7);
+    ctx.ellipse(x + w * 0.1, y - w * 0.1, w * 0.25, w * 0.2, 0, 0, 7); ctx.fill();
+  }
+  [0.15, 0.4].forEach((f, n) => {
+    const shift = -(cam.y - 100) * f * 0.4, base = n ? 70 : 125;
+    const hy = x => { const wx = x + cam.x * f; return VH - base - Math.sin(wx * 0.006 + n) * 28 - Math.sin(wx * 0.017 + n * 2) * 12 + shift; };
+    ctx.fillStyle = th.lay[n];
+    if (th.towers && n === 0) {
+      // Burgtürme in der Ferne
+      const step = 230, from = Math.floor(cam.x * f / step) - 1;
+      for (let k = from; k < from + VW / step + 3; k++) {
+        if (hash(k, 9) < 0.35) continue;
+        const x = k * step - cam.x * f + hash(k, 3) * 80, tw = 34 + hash(k, 4) * 26, th2 = 110 + hash(k, 5) * 90, y = hy(x);
+        ctx.fillRect(x, y - th2, tw, th2 + 20);
+        for (let z = 0; z < tw; z += 12) ctx.fillRect(x + z, y - th2 - 8, 7, 8);
+        ctx.fillStyle = th.roof; ctx.beginPath(); ctx.moveTo(x - 4, y - th2 - 8); ctx.lineTo(x + tw / 2, y - th2 - 40 - hash(k, 6) * 20); ctx.lineTo(x + tw + 4, y - th2 - 8); ctx.fill();
+        ctx.fillStyle = th.lay[n];
+      }
+    }
+    ctx.beginPath(); ctx.moveTo(0, VH);
+    for (let x = 0; x <= VW + 16; x += 16) ctx.lineTo(x, hy(x));
+    ctx.lineTo(VW, VH); ctx.fill();
+    if (!th.towers || n === 1) {
+      // runde Bäume auf den Hügeln
+      const step = 64, from = Math.floor(cam.x * f / step) - 1, dark = mix(th.lay[n], '#000000', 0.18);
+      for (let k = from; k < from + VW / step + 3; k++) {
+        if (hash(k, n + 20) < 0.55) continue;
+        const x = k * step - cam.x * f, y = hy(x) + 6, r = (n ? 16 : 11) + hash(k, n) * 8;
+        ctx.fillStyle = dark; ctx.fillRect(x - 2, y - r, 4, r);
+        ctx.beginPath(); ctx.arc(x, y - r - r * 0.6, r, 0, 7); ctx.fill();
+      }
+      ctx.fillStyle = th.lay[n];
+    }
+  });
+  const [sr, sg2, sb] = th.spore;
+  for (const s of SPORES) {
+    const x = ((s.x - cam.x * s.s) % VW + VW) % VW, y = ((s.y - tick * s.s * 0.4) % VH + VH) % VH;
+    ctx.fillStyle = `rgba(${sr},${sg2},${sb},${0.2 + 0.2 * Math.sin(tick * 0.05 + s.p)})`;
+    ctx.fillRect(x, y, 2, 2);
+  }
+}
 function drawBG() {
+  if (L.theme.sky) return drawSky(L.theme);
   const th = L.theme, g = ctx.createLinearGradient(0, 0, 0, VH);
   g.addColorStop(0, th.bg[0]); g.addColorStop(1, th.bg[1]);
   ctx.fillStyle = g; ctx.fillRect(0, 0, VW, VH);
@@ -90,9 +144,88 @@ function drawDecor(type, x, y, k, th = L.theme) {
     ctx.fillStyle = '#2a1512'; ctx.beginPath(); ctx.ellipse(x + 16, y - 3, 9, 5, 0, 0, 7); ctx.fill();
     ctx.fillStyle = `rgba(255,${120 + glow * 60 | 0},50,${glow})`;
     ctx.fillRect(x + 11, y - 4, 4, 1.5); ctx.fillRect(x + 15, y - 6, 1.5, 3); ctx.fillRect(x + 17, y - 3, 5, 1.5);
+  } else if (type === 'torch') {
+    const fl = Math.sin(tick * 0.3 + k * 20) * 1.5;
+    ctx.fillStyle = '#5a3a22'; ctx.fillRect(x + 15, y - 14, 3, 14);
+    ctx.fillStyle = '#3a2a1a'; ctx.fillRect(x + 13, y - 16, 7, 3);
+    ctx.fillStyle = 'rgba(255,170,60,.25)'; ctx.beginPath(); ctx.arc(x + 16.5, y - 21, 10, 0, 7); ctx.fill();
+    ctx.fillStyle = '#ff9a3c'; ctx.beginPath(); ctx.moveTo(x + 12.5, y - 17); ctx.quadraticCurveTo(x + 16.5 + fl, y - 31, x + 20.5, y - 17); ctx.fill();
+    ctx.fillStyle = '#ffe08a'; ctx.beginPath(); ctx.moveTo(x + 14.5, y - 17); ctx.quadraticCurveTo(x + 16.5 + fl * 0.6, y - 25, x + 18.5, y - 17); ctx.fill();
+  } else if (type === 'banner') {
+    const wv = Math.sin(tick * 0.06 + k * 10) * 1.5;
+    ctx.fillStyle = '#6b5a4a'; ctx.fillRect(x + 9, y - 30, 2, 30);
+    ctx.fillStyle = th.roof || '#c0392b';
+    ctx.beginPath(); ctx.moveTo(x + 11, y - 29); ctx.lineTo(x + 25 + wv, y - 27); ctx.lineTo(x + 23 + wv, y - 21); ctx.lineTo(x + 25 + wv, y - 15); ctx.lineTo(x + 11, y - 17); ctx.fill();
+    ctx.fillStyle = '#ffd36b'; ctx.fillRect(x + 15, y - 25, 4, 4);
+  } else if (type === 'tree') {
+    ctx.fillStyle = '#6b4a2e'; ctx.fillRect(x + 13, y - 22, 6, 22);
+    ctx.fillStyle = mix(th.top, '#000000', 0.15); ctx.beginPath(); ctx.arc(x + 16, y - 34, 15, 0, 7); ctx.fill();
+    ctx.fillStyle = th.top; ctx.beginPath(); ctx.arc(x + 12, y - 38, 10, 0, 7); ctx.fill();
+    ctx.fillStyle = th.topHi; ctx.beginPath(); ctx.arc(x + 10, y - 41, 4, 0, 7); ctx.fill();
+  }
+}
+function drawBossDoor(d) {
+  // grosse Holztür in der Burgmauer
+  const x = d.x + 3, y = d.y - T + 4, w = 26, h = 2 * T - 4;
+  ctx.fillStyle = '#2a1a10'; ctx.beginPath(); ctx.moveTo(x - 3, y + h); ctx.lineTo(x - 3, y + 12); ctx.arc(x + w / 2, y + 12, w / 2 + 3, Math.PI, 0); ctx.lineTo(x + w + 3, y + h); ctx.fill();
+  ctx.fillStyle = '#7a4a26'; ctx.beginPath(); ctx.moveTo(x, y + h); ctx.lineTo(x, y + 12); ctx.arc(x + w / 2, y + 12, w / 2, Math.PI, 0); ctx.lineTo(x + w, y + h); ctx.fill();
+  ctx.fillStyle = '#5a3418'; for (let i = 1; i < 4; i++) ctx.fillRect(x + i * w / 4 - 1, y + 4, 2, h - 4);
+  ctx.fillStyle = '#3a3a48'; ctx.fillRect(x, y + 18, w, 3); ctx.fillRect(x, y + h - 14, w, 3);
+  ctx.fillStyle = '#ffd36b'; ctx.beginPath(); ctx.arc(x + w - 6, y + h / 2 + 4, 2.2, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(x + 4, y - 6); ctx.lineTo(x + 7, y - 15); ctx.lineTo(x + 13, y - 9); ctx.lineTo(x + 19, y - 15); ctx.lineTo(x + 22, y - 6); ctx.fill();
+}
+function drawBoss(b) {
+  if (b.dying > 0 && b.dying % 6 < 3) return;
+  const big = b.kind === 'big', leg = Math.sin(tick * (b.rage ? 0.7 : 0.3)) * 3;
+  ctx.save(); ctx.translate(b.x + b.w / 2, b.y + b.h);
+  if (b.dying > 0) ctx.scale(1 + (110 - b.dying) / 300, 1 - (110 - b.dying) / 200);
+  ctx.fillStyle = '#2a2238';
+  for (let i = -2; i <= 2; i++) ctx.fillRect(i * b.w * 0.18 - 3 + (i % 2 ? leg : -leg), -9, 6, 9);
+  const shell = big ? (b.rage ? '#7a4f6e' : '#5a4f6e') : '#6b5fa8', hi = big ? '#8a7fa6' : '#9a8de0';
+  ctx.fillStyle = shell; ctx.beginPath(); ctx.ellipse(0, -b.h * 0.4, b.w / 2, b.h * 0.52, 0, Math.PI, 0); ctx.fill();
+  ctx.fillRect(-b.w / 2, -b.h * 0.42, b.w, b.h * 0.3);
+  if (big) { ctx.fillStyle = '#c4b3ff'; for (let i = -2; i <= 2; i++) { const sx = i * b.w * 0.17; ctx.beginPath(); ctx.moveTo(sx - 5, -b.h * 0.86 + Math.abs(i) * 6); ctx.lineTo(sx, -b.h * 0.86 + Math.abs(i) * 6 - 12); ctx.lineTo(sx + 5, -b.h * 0.86 + Math.abs(i) * 6); ctx.fill(); } }
+  ctx.fillStyle = hi; ctx.fillRect(-b.w * 0.32, -b.h * 0.78, b.w * 0.22, 4);
+  ctx.fillStyle = big ? '#3a3248' : '#4a4080'; ctx.fillRect(-2, -b.h * 0.9, 4, b.h * 0.5);
+  const ex = b.dir > 0 ? b.w * 0.26 : -b.w * 0.26;
+  ctx.fillStyle = '#fff'; ctx.fillRect(ex - 6, -b.h * 0.4, 10, 10);
+  ctx.fillStyle = big ? '#ff3a3a' : '#120d1e'; ctx.fillRect(ex - 6 + (b.dir > 0 ? 5 : 0), -b.h * 0.4 + 3, 5, 5);
+  const cw = big ? 34 : 26, cy = -b.h * 0.9 - 4;
+  ctx.fillStyle = '#ffd36b'; ctx.beginPath(); ctx.moveTo(-cw / 2, cy); ctx.lineTo(-cw / 2, cy - 12); ctx.lineTo(-cw / 4, cy - 5); ctx.lineTo(0, cy - 15);
+  ctx.lineTo(cw / 4, cy - 5); ctx.lineTo(cw / 2, cy - 12); ctx.lineTo(cw / 2, cy); ctx.fill();
+  ctx.fillStyle = '#ff5d5d'; ctx.fillRect(-2, cy - 8, 4, 4);
+  if (b.inv > 0 && tick % 6 < 3) { ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.beginPath(); ctx.ellipse(0, -b.h * 0.4, b.w / 2, b.h * 0.52, 0, Math.PI, 0); ctx.fill(); }
+  ctx.restore();
+}
+function drawBrick(c, r, x, y) {
+  // Burgmauer aus Ziegeln
+  const th = L.theme, d = depth(c, r);
+  ctx.fillStyle = th.shades[d]; ctx.fillRect(x, y, T, T);
+  ctx.fillStyle = th.speck;
+  for (let k = 0; k < 4; k++) {
+    const yy = y + k * 8; ctx.fillRect(x, yy, T, 1);
+    for (let xx = (k + r) % 2 ? 0 : 8; xx < T; xx += 16) ctx.fillRect(x + xx, yy, 1, 8);
+  }
+  if (hash(c, r) > 0.7) { ctx.fillStyle = 'rgba(255,255,255,.07)'; ctx.fillRect(x + 1 + (hash(r, c) * 15 | 0), y + 1 + 8 * (hash(c + 3, r) * 4 | 0), 15, 7); }
+  if (!solidish(c - 1, r)) { ctx.fillStyle = th.light; ctx.fillRect(x, y, 2, T); }
+  if (!solidish(c + 1, r)) { ctx.fillStyle = th.deep; ctx.fillRect(x + T - 2, y, 2, T); }
+  if (r + 1 < LH && !solidish(c, r + 1)) {
+    ctx.fillStyle = th.deep; ctx.fillRect(x, y + T - 3, T, 3);
+    if (hash(c + 5, r + 9) > 0.6) { ctx.fillStyle = th.hang; ctx.fillRect(x + 4 + (hash(r, c + 2) * 22 | 0), y + T, 2, 6 + hash(c, r + 4) * 12); }
+  }
+  if (d === 0) {
+    ctx.fillStyle = th.top; ctx.fillRect(x, y, T, 6);
+    ctx.fillStyle = th.topHi; ctx.fillRect(x, y, T, 2);
+    ctx.fillStyle = th.speck; ctx.fillRect(x + 15, y, 1, 6);
+    if (hash(c, r + 7) > 0.6) { ctx.fillStyle = th.blade; ctx.fillRect(x + 3 + (hash(c, r) * 20 | 0), y - 3, 7, 3); }
+    if (r >= 2 && !solidish(c, r - 1) && !L.occupied.has((r - 1) * L.w + c)) {
+      const k = hash(c * 7 + 1, r * 3 + 2);
+      if (k > 0.6) drawDecor(th.decor[(hash(c, r * 5) * th.decor.length) | 0], x, y, k);
+    }
   }
 }
 function drawRock(c, r, x, y) {
+  if (L.theme.brick) return drawBrick(c, r, x, y);
   const th = L.theme, d = depth(c, r), h1 = hash(c, r), h2 = hash(r + 31, c), h3 = hash(c + 17, r * 3);
   ctx.fillStyle = th.shades[d]; ctx.fillRect(x, y, T, T);
   if (d > 0) { ctx.fillStyle = th.speck; ctx.fillRect(x, y + 6 + (h1 * 20 | 0), T, 1); }
@@ -267,15 +400,18 @@ function hole(x, y, r) {
   lx.fillStyle = g; lx.beginPath(); lx.arc(x, y, r, 0, 7); lx.fill();
 }
 function drawLight() {
+  if ((L.theme.dark ?? 0.66) <= 0) return;   // an der Oberfläche ist es hell
   lx.setTransform(S, 0, 0, S, 0, 0);
   lx.globalCompositeOperation = 'source-over'; lx.clearRect(0, 0, VW, VH);
-  lx.fillStyle = 'rgba(5,3,12,0.66)'; lx.fillRect(0, 0, VW, VH);
+  lx.fillStyle = `rgba(5,3,12,${L.theme.dark ?? 0.66})`; lx.fillRect(0, 0, VW, VH);
   lx.globalCompositeOperation = 'destination-out';
   const ox = -cam.x, oy = -cam.y, flick = Math.sin(tick * 0.13) * 4;
   if (state !== 'dead') hole(P.x + P.w/2 + ox, P.y + 10 + oy, 165 + flick);
   for (const s of L.lanterns) if (!s.got && !lanternHidden(s) && Math.abs(s.x - cam.x - VW/2) < VW) hole(s.x + ox, s.y + oy, 52);
   for (const c of L.checks) hole(c.x + 16 + ox, c.y + 14 + oy, c.on ? 110 : 34);
   if (L.door) hole(L.door.x + 16 + ox, L.door.y + oy, 90);
+  if (L.bossDoor) hole(L.bossDoor.x + 16 + ox, L.bossDoor.y + oy, 80);
+  if (L.boss && L.inArena) hole(L.boss.x + L.boss.w / 2 + ox, L.boss.y + L.boss.h / 2 + oy, 120);
   for (const q of parts) hole(q.x + ox, q.y + oy, 14);
   for (const t of trail) hole(t.x + ox, t.y + oy, 40 * t.life / t.max);
   ctx.drawImage(lc, 0, 0, VW, VH);
@@ -299,11 +435,22 @@ function drawHUD() {
   const g = ctx.createLinearGradient(0, 0, 0, 46); g.addColorStop(0, 'rgba(6,4,14,.85)'); g.addColorStop(1, 'rgba(6,4,14,0)');
   ctx.fillStyle = g; ctx.fillRect(0, 0, VW, 46);
   small(`Ebene ${li + 1} · ${L.def.name}`, 14, 18, 16, '#ffffff', 'left');
-  drawLantern(null, ctx, VW - 262, 19, 0.6);
-  small(`${lanternsNow()}/${L.lanterns.length}`, VW - 252, 18, 16, '#ffe2a3', 'left');
-  small(`Stürze ${deaths}`, VW - 196, 18, 16, '#d6cbff', 'left');
-  small(fmt(time), VW - 56, 18, 16, '#ffffff', 'right');
-  if (muted) small('Ton aus', VW - 56, 38, 13, '#c9c0dc', 'right');
+  drawLantern(null, ctx, VW - 312, 19, 0.6);
+  small(`${lanternsNow()}/${L.lanterns.length}`, VW - 302, 18, 16, '#ffe2a3', 'left');
+  small(`Stürze ${deaths}`, VW - 246, 18, 16, '#d6cbff', 'left');
+  small(fmt(time), VW - 106, 18, 16, '#ffffff', 'right');
+  if (muted) small('Ton aus', VW - 106, 38, 13, '#c9c0dc', 'right');
+  if (L.boss && L.inArena) {
+    // Lebensanzeige des Bosses
+    const b = L.boss;
+    text(b.name, VW / 2, 60, 18, '#ffb547');
+    if (b.wait > 0) small(`${heroName()}, spring ${b.max}-mal auf den Boss! Nicht berühren!`, VW / 2, 102, 15, '#ffffff');
+    for (let i = 0; i < b.max; i++) {
+      const x = VW / 2 - b.max * 15 + i * 30 + 3;
+      ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(x - 1, 73, 26, 10);
+      ctx.fillStyle = i < b.hp ? '#ff5d5d' : 'rgba(255,255,255,.18)'; ctx.fillRect(x, 74, 24, 8);
+    }
+  }
   if (NET.room) small(`Gruppe ${NET.room} · ${Object.keys(NET.peers).length} dabei`, 14, 38, 13, '#cdaeff', 'left');
 }
 function panel(h) { ctx.fillStyle = 'rgba(8,5,16,.85)'; ctx.fillRect(0, VH/2 - h/2, VW, h); }
@@ -318,6 +465,8 @@ function render() {
   L.crumbles.forEach(drawCrumble);
   L.spikes.forEach(drawSpike); L.springs.forEach(drawSpring); L.checks.forEach(drawCheck);
   if (L.door) drawDoor(L.door);
+  if (L.bossDoor) drawBossDoor(L.bossDoor);
+  if (L.boss && L.inArena) drawBoss(L.boss);
   L.plats.forEach(drawPlat);
   for (const e of L.enemies) if (e.alive) drawEnemy(e);
   drawFake(false);
@@ -336,6 +485,7 @@ function render() {
   for (const s of L.lanterns) if (!s.got && !lanternHidden(s) && Math.abs(s.x - cam.x - VW/2) < VW) drawLantern(s);
   drawGhosts();
   ctx.restore();
+  if (fadeT > 0) { ctx.fillStyle = `rgba(0,0,0,${fadeT / 26})`; ctx.fillRect(0, 0, VW, VH); }
   if (state === 'idle') return;
   drawHUD();
   if (toastT > 0) {
@@ -348,9 +498,9 @@ function render() {
   if (state === 'pause') { panel(100); text('PAUSE', VW/2, VH/2 - 14, 36, '#ffffff'); small('Tippen zum Weiterspielen', VW/2, VH/2 + 24, 16, '#d6cbff'); }
   if (state === 'clear') {
     panel(126);
-    text('EBENE GESCHAFFT!', VW/2, VH/2 - 26, 36, '#a8f597');
+    text(L.boss ? 'BOSS BESIEGT!' : 'EBENE GESCHAFFT!', VW/2, VH/2 - 26, 36, '#a8f597');
     small(`Laternen ${lanternsNow()}/${L.lanterns.length}   ·   Zeit ${fmt(time)}   ·   Stürze ${deaths}`, VW/2, VH/2 + 14, 17, '#ffe2a3');
     small(`Geheimgänge ${L.fgroups.filter(f => f.found).length}/${L.fgroups.length}   ·   ` +
-      (li + 1 < LEVELS.length ? 'Die nächste Höhle ist jetzt offen.' : 'Alle Höhlen geschafft!'), VW/2, VH/2 + 40, 15, '#d6cbff');
+      (li + 1 < LEVELS.length ? 'Der Weg zur nächsten Ebene ist frei.' : 'Alle Ebenen geschafft!'), VW/2, VH/2 + 40, 15, '#d6cbff');
   }
 }
