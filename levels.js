@@ -13,6 +13,9 @@ const THEMES = {
   autumn: {sky: true, dark: 0, stone:'#7a4f36', deep:'#3f2618', light:'#9a6a4a', speck:'#5e3a26', top:'#c98b2e', topHi:'#ffd26b', blade:'#e0a040',
     hang:'#b06a2a', plank:'#7a4a2a', plankHi:'#b4784a', mush:'#ff8a5a', bg:['#ff9f5e','#ffe3bd'], lay:['#e8a96a','#c98650'], spore:[255,220,160],
     sun:'#fff0c8', decor:['tuft','mush','pebble','flower','root','tuft']},
+  forest: {sky: true, dark: 0, stone:'#6e4a32', deep:'#3a2618', light:'#8c6446', speck:'#523624', top:'#3f9a3a', topHi:'#86d96a', blade:'#5cb84a',
+    hang:'#3f8a34', plank:'#7a5232', plankHi:'#a87a4a', mush:'#ff6f6f', bg:['#4aa6f0','#cfeefc'], lay:['#7cc46a','#4f9a46'], spore:[230,255,220],
+    sun:'#fff3b0', decor:['tuft','mush','pebble','flower','tuft','root']},
   /* --- Burgen: Ziegel (brick) und Türme im Hintergrund (towers) --- */
   castle: {sky: true, dark: 0, brick: true, towers: true, stone:'#7d7a8c', deep:'#4a4858', light:'#a19eb2', speck:'#5f5c6e', top:'#8c8a9c', topHi:'#c9c7d8',
     blade:'#6fbf5c', hang:'#5f8a4a', plank:'#6b4a32', plankHi:'#8c6443', mush:'#ff7ab8', bg:['#6fb8ff','#e0f3ff'], lay:['#a3a8c0','#878ca6'],
@@ -141,18 +144,23 @@ const SEG = {
     G = top; return x+15;
   },
 
-  /* --- Geheimnisse: F sieht aus wie Fels, ist aber begehbar --- */
+  /* ===== Geheimräume =====
+     F = Scheinfels: sieht aus wie Fels, ist aber begehbar. Ein ganzer Raum aus F bleibt unsichtbar, bis man ihn betritt.
+     b.secret([...]) legt die Laternen in den Raum (wie viele, entscheidet die Ebene).
+     Regel: Jede Bauart kommt im ganzen Spiel höchstens 3-mal vor.
+     secretCeil (Fake-Decke) und startSecret (Falltür am Start) nur in den Höhlen.
+     Bauarten, die unter den Boden gehen, brauchen 3 Reihen Platz unter der Bodenhöhe. */
   secretHill(b, x) {
     // Hügel mit verstecktem Raum: von der Stufe aus einfach gegen die Wand laufen
     const g0 = G; b.ground(x, x+13, g0); b.ground(x+1, x+2, g0-2); b.ground(x+3, x+12, g0-4);
-    b.fill(x+3, x+10, g0-3, g0-1, 'F'); b.ent(x+9, g0-1, 'O');
+    b.fill(x+3, x+10, g0-3, g0-1, 'F'); b.secret([[x+9, g0-1], [x+6, g0-2], [x+4, g0-1]]);
     b.put(x+7, g0-6, 'o'); return x+14;
   },
   secretCeil(b, x) {
     // Gang mit dicker Decke, darüber ein Raum: nur mit Sprung und Dash nach oben erreichbar
     const g0 = G; b.ground(x, x+13, g0); b.fill(x, x+13, Math.max(0, g0-12), g0-4, '#');
     b.fill(x+4, x+10, g0-8, g0-6, 'F'); b.fill(x+6, x+7, g0-5, g0-4, 'F');
-    b.ent(x+9, g0-6, 'O'); b.put(x+3, g0-1, 'o'); b.put(x+11, g0-1, 'o');
+    b.secret([[x+9, g0-6], [x+5, g0-7], [x+8, g0-8]]); b.put(x+3, g0-1, 'o'); b.put(x+11, g0-1, 'o');
     return x+14;
   },
   /* --- Burg: dicke Mauer mit Tür, dahinter der Bossraum (dort bleibt die Kamera stehen) --- */
@@ -169,85 +177,160 @@ const SEG = {
     b.meta.arena = {c0: a0, c1: a1, top: top + 1, floor: g};
     return a1 + 9;
   },
+  fakeFloor(b, x) {
+    // Falscher Boden: zwei Bodenplatten sind nicht echt, darunter ein Raum. Ein Sprungpilz bringt dich wieder hinauf
+    const g = G; b.ground(x, x + 12, g);
+    b.fill(x + 3, x + 4, g, g, 'F'); b.fill(x + 2, x + 10, g + 1, g + 2, 'F'); b.fill(x + 8, x + 10, g, g, 'F');
+    b.ent(x + 9, g + 2, 'S');
+    b.secret([[x + 6, g + 2], [x + 4, g + 1], [x + 7, g + 1]]);
+    b.put(x + 1, g - 1, 'o'); b.put(x + 12, g - 2, 'o'); return x + 13;
+  },
+  crumbleDrop(b, x) {
+    // Bröckelloch: eine Bröckelplatte im Boden, darunter ein Raum. Ein Sprungpilz führt links wieder hinauf
+    const g = G; b.ground(x, x + 12, g);
+    b.fill(x + 7, x + 8, g, g, 'X');
+    b.fill(x + 1, x + 9, g + 1, g + 2, 'F'); b.fill(x + 1, x + 3, g, g, '=');   // Holzluke: von unten springt man durch
+    b.ent(x + 2, g + 2, 'S');
+    b.secret([[x + 5, g + 2], [x + 6, g + 1], [x + 8, g + 2]]);
+    b.put(x + 10, g - 2, 'o'); return x + 13;
+  },
+  backWall(b, x) {
+    // Felskante: über Bretter auf die Felsplatte, rechts hinunter – dann umdrehen und zurück in die Wand laufen
+    const g = G; b.ground(x, x + 14, g);
+    b.fill(x + 2, x + 3, g - 2, g - 2, '='); b.ground(x + 5, x + 9, g - 4);
+    b.fill(x + 6, x + 9, g - 3, g - 1, 'F');
+    b.secret([[x + 7, g - 1], [x + 8, g - 3], [x + 9, g - 1]]);
+    b.put(x + 7, g - 6, 'o'); b.put(x + 12, g - 2, 'o'); return x + 15;
+  },
+  pitRoom(b, x) {
+    // Grube: unten in der Grube ist die linke Wand nicht echt. Raus geht es mit dem Sprungpilz rechts
+    const g = G; b.ground(x, x + 5, g); b.ground(x + 6, x + 8, g + 3); b.ground(x + 9, x + 14, g);
+    b.fill(x, x + 5, g + 1, g + 2, 'F');
+    b.ent(x + 8, g + 2, 'S');
+    b.secret([[x + 1, g + 2], [x + 3, g + 1], [x + 4, g + 2]]);
+    b.put(x + 7, g - 2, 'o'); b.put(x + 12, g - 1, 'o'); return x + 15;
+  },
+  doorSecret(b, x) {
+    // Hinter dem Ziel: über die Tür springen! Dahinter steckt ein Raum im Felsen. Ersetzt ['door'] am Ende einer Ebene
+    const g = G; b.ground(x, x + 15, g);
+    b.put(x + 2, g - 2, 'o'); b.put(x + 5, g - 1, 'D');
+    b.fill(x + 9, x + 15, g - 5, g - 1, '#'); b.fill(x + 9, x + 13, g - 3, g - 1, 'F');
+    b.secret([[x + 11, g - 1], [x + 12, g - 3], [x + 13, g - 1]]);
+    return x + 16;
+  },
+  dipTunnel(b, x) {
+    // Mulde: in der kleinen Mulde führt rechts ein niedriger Gang unter den Boden
+    const g = G; b.ground(x, x + 3, g); b.ground(x + 4, x + 6, g + 2); b.ground(x + 7, x + 14, g);
+    b.fill(x + 7, x + 13, g + 1, g + 1, 'F');
+    b.secret([[x + 13, g + 1], [x + 11, g + 1], [x + 9, g + 1]]);
+    b.put(x + 5, g - 1, 'o'); b.put(x + 13, g - 2, 'o'); return x + 15;
+  },
+  springWall(b, x) {
+    // Pilzwand: der Sprungpilz schleudert dich über die hohe Wand. Beim Herunterfallen auf der anderen Seite zurück in die Wand lenken!
+    const g = G; b.ground(x, x + 15, g);
+    b.put(x + 3, g - 1, 'S');
+    b.fill(x + 5, x + 9, g - 4, g - 1, '#'); b.fill(x + 7, x + 9, g - 3, g - 2, 'F');
+    b.secret([[x + 8, g - 2], [x + 7, g - 3], [x + 9, g - 2]]);
+    b.put(x + 7, g - 7, 'o'); b.put(x + 13, g - 2, 'o'); return x + 16;
+  },
+  abyssNook(b, x) {
+    // Abgrund-Nische: in den Abgrund fallen lassen, an der linken Wand rutschen und hineinlenken. Ein Sprungpilz bringt dich hinauf
+    const g = G; b.ground(x, x + 4, g); b.ground(x + 8, x + 12, g);
+    b.fill(x, x + 4, g + 1, g + 2, 'F'); b.fill(x, x + 2, g, g, '=');   // Holzluke als Ausgang
+    b.ent(x + 1, g + 2, 'S');
+    b.secret([[x + 3, g + 2], [x + 4, g + 1], [x + 3, g + 1]]);
+    b.put(x + 6, g - 3, 'o'); b.put(x + 10, g - 1, 'o'); return x + 13;
+  },
+  hollowBoulder(b, x) {
+    // Hohler Felsblock: vom kleinen Stein aus gegen den oberen Teil des Blocks springen
+    const g = G; b.ground(x, x + 12, g);
+    b.put(x + 2, g - 1, '#'); b.fill(x + 4, x + 7, g - 3, g - 1, '#');
+    b.fill(x + 4, x + 7, g - 3, g - 2, 'F'); b.put(x + 4, g - 1, '#');
+    b.secret([[x + 5, g - 2], [x + 6, g - 3], [x + 7, g - 2]]);
+    b.put(x + 10, g - 1, 'o'); return x + 13;
+  },
   startSecret(b, x) {
     // Falltür gleich links vom Start, darunter ein Raum mit Sprungpilz zurück nach oben
     const g0 = G; b.ground(x, x+9, g0); b.fill(x, x+6, g0+2, g0+4, 'F'); b.fill(x, x+1, g0, g0+1, 'F');
-    b.ent(x, g0+4, 'S'); b.ent(x+5, g0+4, 'O'); b.put(x+4, g0-1, 'P'); b.put(x+8, g0-1, 'o');
+    b.ent(x, g0+4, 'S'); b.secret([[x+5, g0+4], [x+3, g0+3], [x+6, g0+2]]); b.put(x+4, g0-1, 'P'); b.put(x+8, g0-1, 'o');
     return x+10;
   },
 };
 
 const LEVELS = [
-  /* ===== Oberfläche (Ebene 1–12) =====
-     id: fester Name für Speicherstand und Rangliste (nie ändern, sonst gehen Bestzeiten verloren).
-     boss: 'mini' = Zwischenboss, 'big' = Endboss. lan = Anzahl Laternen. h/g0 = Höhe der Ebene und Start-Bodenreihe. */
-  { id: 's1', name: 'Sonnenwiese', theme: 'meadow', lan: 6, segs: [
-    ['start'], ['flat',10,2], ['gap',2], ['flat',6,1], ['stairs'], ['enemyRun'], ['check'], ['pillars',[1,2,3,2,1]], ['gap',2],
-    ['flat',8,2,true], ['secretHill'], ['springUp'], ['flat',6,1], ['door']] },
-  { id: 's2', name: 'Blumenhügel', theme: 'meadow', lan: 7, segs: [
-    ['start'], ['stairs'], ['gap',3], ['planksZig'], ['check'], ['enemyRun'], ['pillars'], ['secretHill'], ['crumbleBridge'], ['check'],
-    ['wallClimb'], ['flat',8,2,true], ['dashGap'], ['flat',6,1], ['door']] },
-  { id: 's3', name: 'Bachufer', theme: 'meadow', lan: 7, segs: [
-    ['start'], ['flat',8,2], ['movingCross'], ['gap',2], ['spikeRun'], ['check'], ['lift'], ['crumbleBridge'], ['secretCeil'], ['enemyRun'],
-    ['check'], ['movingCross'], ['springUp'], ['flat',6,1], ['door']] },
-  { id: 's4', name: 'Pilzwäldchen', theme: 'meadow', lan: 8, h: 30, g0: 22, segs: [
-    ['start'], ['flat',6,1], ['climb',6], ['enemyRun'], ['secretHill'], ['dashGap'], ['check'], ['tunnel'], ['crumbleClimb'], ['check'],
-    ['descend',6], ['pillars',[2,4,2,4,2]], ['planksZig'], ['door']] },
-  { id: 's5', name: 'Windige Klippen', theme: 'meadow', lan: 8, segs: [
-    ['start'], ['dashGap'], ['pillars',[1,3,5,3,1]], ['check'], ['crumbleBridge'], ['wallClimb'], ['shaft'], ['check'], ['movingCross'],
-    ['spikeRun'], ['secretHill'], ['lift'], ['enemyRun'], ['door']] },
-  { id: 's6', name: 'Burg Knorrstein', theme: 'castle', lan: 6, boss: 'mini', segs: [
-    ['start'], ['flat',6,1], ['stairs'], ['enemyRun'], ['check'], ['spikeRun'], ['pillars',[2,4,2,4,2]], ['crumbleBridge'], ['check'],
-    ['secretHill'], ['flat',6,1], ['check'], ['boss','mini']] },
+  /* ===== Welt 1: Sonnenland (Ebene 1–12) =====
+     id: fester Name für Speicherstand (nie ändern). world: Welt auf der Karte.
+     boss: 'mini' = Zwischenboss, 'big' = Endboss. h/g0 = Höhe der Ebene und Start-Bodenreihe.
+     Jede Ebene hat 2 Geheimräume mit zusammen 3 Laternen. Alle 'o' in den Bausteinen werden zu Funken. */
+  { id: 's1', world: 1, name: 'Sonnenwiese', theme: 'meadow', segs: [
+    ['start'], ['flat',10,3], ['gap',2], ['flat',6,2], ['secretHill'], ['stairs'], ['enemyRun'], ['check'], ['pillars',[1,2,3,2,1]], ['gap',2],
+    ['flat',8,3,true], ['fakeFloor'], ['springUp'], ['flat',6,2], ['door']] },
+  { id: 's2', world: 1, name: 'Blumenhügel', theme: 'meadow', segs: [
+    ['start'], ['flat',6,2], ['stairs'], ['dipTunnel'], ['gap',3], ['planksZig'], ['check'], ['enemyRun'], ['pillars'], ['crumbleBridge'], ['check'],
+    ['wallClimb'], ['flat',8,3,true], ['pitRoom'], ['dashGap'], ['flat',6,2], ['door']] },
+  { id: 's3', world: 1, name: 'Bachufer', theme: 'meadow', segs: [
+    ['start'], ['flat',8,3], ['movingCross'], ['crumbleDrop'], ['gap',2], ['spikeRun'], ['check'], ['lift'], ['crumbleBridge'], ['enemyRun'],
+    ['check'], ['movingCross'], ['springUp'], ['flat',6,2], ['doorSecret']] },
+  { id: 's4', world: 1, name: 'Pilzwäldchen', theme: 'meadow', h: 30, g0: 22, segs: [
+    ['start'], ['flat',6,2], ['climb',6], ['enemyRun'], ['backWall'], ['dashGap'], ['check'], ['tunnel'], ['crumbleClimb'], ['check'],
+    ['descend',6], ['hollowBoulder'], ['pillars',[2,4,2,4,2]], ['planksZig'], ['flat',6,2], ['door']] },
+  { id: 's5', world: 1, name: 'Windige Klippen', theme: 'meadow', segs: [
+    ['start'], ['dashGap'], ['pillars',[1,3,5,3,1]], ['check'], ['springWall'], ['crumbleBridge'], ['wallClimb'], ['shaft'], ['check'], ['movingCross'],
+    ['spikeRun'], ['abyssNook'], ['lift'], ['enemyRun'], ['door']] },
+  { id: 's6', world: 1, name: 'Burg Knorrstein', theme: 'castle', boss: 'mini', segs: [
+    ['start'], ['flat',6,2], ['stairs'], ['enemyRun'], ['check'], ['pitRoom'], ['spikeRun'], ['pillars',[2,4,2,4,2]], ['crumbleBridge'], ['check'],
+    ['secretHill'], ['flat',6,2], ['check'], ['boss','mini']] },
   /* ab hier etwas schwieriger */
-  { id: 's7', name: 'Herbsthain', theme: 'autumn', lan: 8, segs: [
-    ['start'], ['spikeRun'], ['gap',3], ['enemyRun'], ['check'], ['crumbleClimb'], ['dashGap'], ['secretHill'], ['movingCross'], ['check'],
-    ['wallClimb'], ['spikeRun'], ['pillars',[1,4,2,5,3]], ['door']] },
-  { id: 's8', name: 'Dornenpfad', theme: 'autumn', lan: 8, segs: [
-    ['start'], ['flat',6,1], ['spikeRun'], ['spikeRun'], ['check'], ['planksZig'], ['crumbleBridge'], ['enemyRun'], ['check'],
-    ['secretCeil'], ['shaft'], ['dashGap'], ['spikeRun'], ['door']] },
-  { id: 's9', name: 'Bröckelschlucht', theme: 'autumn', lan: 9, h: 36, g0: 10, segs: [
-    ['start'], ['crumbleBridge'], ['descend',8], ['crumbleClimb'], ['check'], ['crumbleBridge'], ['secretHill'], ['descend',6],
-    ['movingCross'], ['check'], ['crumbleClimb'], ['dashGap'], ['enemyRun'], ['door']] },
-  { id: 's10', name: 'Wolkenstufen', theme: 'meadow', lan: 9, h: 40, g0: 34, segs: [
-    ['start'], ['climb',8], ['lift'], ['springUp'], ['check'], ['climb',6], ['movingCross'], ['secretCeil'], ['pillars',[2,4,6,4,2]],
-    ['check'], ['climb',6], ['crumbleClimb'], ['dashGap'], ['door']] },
-  { id: 's11', name: 'Sturmgrat', theme: 'autumn', lan: 10, segs: [
-    ['start'], ['dashGap'], ['pillars',[2,4,2,4,6]], ['crumbleBridge'], ['check'], ['spikeRun'], ['wallClimb'], ['enemyRun'], ['shaft'],
-    ['check'], ['movingCross'], ['secretHill'], ['crumbleClimb'], ['dashGap'], ['spikeRun'], ['door']] },
-  { id: 's12', name: 'Schattenfeste', theme: 'fortress', lan: 8, boss: 'big', segs: [
-    ['start'], ['spikeRun'], ['crumbleBridge'], ['check'], ['enemyRun'], ['wallClimb'], ['pillars',[2,4,6,4,2]], ['check'], ['shaft'],
-    ['spikeRun'], ['dashGap'], ['secretHill'], ['check'], ['boss','big']] },
+  { id: 's7', world: 1, name: 'Tannenhain', theme: 'forest', segs: [
+    ['start'], ['spikeRun'], ['gap',3], ['fakeFloor'], ['enemyRun'], ['check'], ['crumbleClimb'], ['dashGap'], ['movingCross'], ['check'],
+    ['crumbleDrop'], ['wallClimb'], ['spikeRun'], ['pillars',[1,4,2,5,3]], ['door']] },
+  { id: 's8', world: 1, name: 'Dornenpfad', theme: 'forest', segs: [
+    ['start'], ['flat',6,2], ['spikeRun'], ['dipTunnel'], ['spikeRun'], ['check'], ['planksZig'], ['crumbleBridge'], ['enemyRun'], ['check'],
+    ['backWall'], ['shaft'], ['dashGap'], ['spikeRun'], ['door']] },
+  { id: 's9', world: 1, name: 'Bröckelschlucht', theme: 'forest', h: 36, g0: 10, segs: [
+    ['start'], ['crumbleBridge'], ['descend',8], ['hollowBoulder'], ['crumbleClimb'], ['check'], ['crumbleBridge'], ['descend',6],
+    ['movingCross'], ['check'], ['crumbleClimb'], ['dashGap'], ['enemyRun'], ['doorSecret']] },
+  { id: 's10', world: 1, name: 'Wolkenstufen', theme: 'meadow', h: 40, g0: 34, segs: [
+    ['start'], ['climb',8], ['lift'], ['springWall'], ['check'], ['climb',6], ['movingCross'], ['pillars',[2,4,6,4,2]],
+    ['check'], ['abyssNook'], ['climb',6], ['crumbleClimb'], ['dashGap'], ['door']] },
+  { id: 's11', world: 1, name: 'Sturmgrat', theme: 'forest', segs: [
+    ['start'], ['dashGap'], ['pillars',[2,4,2,4,6]], ['secretHill'], ['crumbleBridge'], ['check'], ['spikeRun'], ['wallClimb'], ['enemyRun'], ['shaft'],
+    ['check'], ['movingCross'], ['crumbleDrop'], ['crumbleClimb'], ['dashGap'], ['spikeRun'], ['door']] },
+  { id: 's12', world: 1, name: 'Schattenfeste', theme: 'fortress', boss: 'big', segs: [
+    ['start'], ['spikeRun'], ['fakeFloor'], ['crumbleBridge'], ['check'], ['enemyRun'], ['wallClimb'], ['pillars',[2,4,6,4,2]], ['check'], ['shaft'],
+    ['spikeRun'], ['dashGap'], ['dipTunnel'], ['check'], ['boss','big']] },
 
-  /* ===== Höhlen (Ebene 13–18) ===== */
-  { id: '0', name: 'Der Eingang', theme: 'moss', lan: 7, segs: [
-    ['start'], ['flat',10,2], ['gap',2], ['flat',6,1], ['stairs'], ['spikeRun'], ['secretHill'], ['enemyRun'], ['check'],
-    ['pillars'], ['planksZig'], ['gap',3], ['flat',8,2,true], ['crumbleBridge'], ['check'], ['wallClimb'], ['arch'],
-    ['springUp'], ['gap',2], ['flat',8,2], ['door']] },
-  { id: '1', name: 'Wurzelgänge', theme: 'roots', lan: 8, segs: [
-    ['start'], ['flat',8,2], ['movingCross'], ['check'], ['secretHill'], ['tunnel'], ['springUp'], ['gap',3], ['lift'], ['enemyRun'], ['check'],
-    ['crumbleClimb'], ['shaft'], ['flat',8,2,true], ['spikeRun'], ['movingCross'], ['check'], ['planksZig'], ['dashGap'],
+  /* ===== Welt 2: Moosgrotte (Ebene 13–18) – unten am Ende der Rutsche ===== */
+  { id: '0', world: 2, name: 'Der Eingang', theme: 'moss', segs: [
+    ['start'], ['flat',10,3], ['gap',2], ['flat',6,2], ['stairs'], ['spikeRun'], ['secretCeil'], ['enemyRun'], ['check'],
+    ['pillars'], ['planksZig'], ['gap',3], ['flat',8,3,true], ['crumbleBridge'], ['check'], ['pitRoom'], ['wallClimb'], ['arch'],
+    ['springUp'], ['gap',2], ['flat',8,3], ['door']] },
+  { id: '1', world: 2, name: 'Wurzelgänge', theme: 'roots', segs: [
+    ['start'], ['flat',8,3], ['movingCross'], ['check'], ['backWall'], ['tunnel'], ['springUp'], ['gap',3], ['lift'], ['enemyRun'], ['check'],
+    ['crumbleClimb'], ['shaft'], ['flat',8,3,true], ['spikeRun'], ['movingCross'], ['check'], ['secretCeil'], ['planksZig'], ['dashGap'],
     ['arch'], ['door']] },
-  { id: '2', name: 'Kristallschlund', theme: 'crystal', lan: 8, segs: [
+  { id: '2', world: 2, name: 'Kristallschlund', theme: 'crystal', segs: [
     ['start'], ['dashGap'], ['pillars',[1,3,5,3,1]], ['check'], ['secretCeil'], ['shaft'], ['crumbleBridge'], ['tunnel',18], ['lift'], ['check'],
-    ['crumbleClimb'], ['movingCross'], ['enemyRun'], ['shaft'], ['check'], ['springUp'], ['crumbleBridge'],
+    ['crumbleClimb'], ['movingCross'], ['enemyRun'], ['shaft'], ['check'], ['springUp'], ['hollowBoulder'], ['crumbleBridge'],
     ['pillars',[2,4,2,4,6]], ['wallClimb'], ['spikeRun'], ['door']] },
   // Ab hier: Ebenen, die nach unten, nach oben oder beides führen
-  { id: '3', name: 'Pilzbrunnen', theme: 'fungus', lan: 8, h: 40, g0: 10, segs: [
-    ['startSecret'], ['flat',8,2], ['descend',6], ['enemyRun'], ['secretHill'], ['descend',8], ['check'], ['crumbleBridge'],
-    ['movingCross'], ['descend',6], ['tunnel'], ['secretCeil'], ['check'], ['pillars'], ['descend',4], ['springUp'],
+  { id: '3', world: 2, name: 'Pilzbrunnen', theme: 'fungus', h: 40, g0: 10, segs: [
+    ['startSecret'], ['flat',8,3], ['descend',6], ['enemyRun'], ['springWall'], ['descend',8], ['check'], ['crumbleBridge'],
+    ['movingCross'], ['descend',6], ['tunnel'], ['check'], ['pillars'], ['descend',4], ['springUp'],
     ['planksZig'], ['door']] },
-  { id: '4', name: 'Glutkamin', theme: 'ember', lan: 9, h: 40, g0: 34, segs: [
-    ['start'], ['flat',6,1], ['climb',8], ['spikeRun'], ['secretHill'], ['climb',6], ['check'], ['crumbleClimb'], ['lift'],
-    ['climb',6], ['enemyRun'], ['secretCeil'], ['check'], ['shaft'], ['wallClimb'], ['dashGap'], ['door']] },
-  { id: '5', name: 'Abgrundpfad', theme: 'abyss', lan: 10, h: 36, g0: 12, segs: [
-    ['startSecret'], ['dashGap'], ['descend',8], ['crumbleBridge'], ['secretHill'], ['climb',6], ['tunnel',18], ['check'],
-    ['descend',10], ['movingCross'], ['enemyRun'], ['climb',8], ['check'], ['secretCeil'], ['pillars',[2,4,2,4,6]],
-    ['descend',6], ['crumbleClimb'], ['shaft'], ['door']] },
+  { id: '4', world: 2, name: 'Glutkamin', theme: 'ember', h: 40, g0: 34, segs: [
+    ['startSecret'], ['flat',6,2], ['abyssNook'], ['climb',8], ['spikeRun'], ['climb',6], ['check'], ['crumbleClimb'], ['lift'],
+    ['climb',6], ['enemyRun'], ['check'], ['shaft'], ['wallClimb'], ['dashGap'], ['door']] },
+  { id: '5', world: 2, name: 'Abgrundpfad', theme: 'abyss', h: 36, g0: 12, segs: [
+    ['startSecret'], ['dashGap'], ['descend',8], ['crumbleBridge'], ['climb',6], ['tunnel',18], ['check'],
+    ['descend',10], ['movingCross'], ['enemyRun'], ['climb',8], ['check'], ['pillars',[2,4,2,4,6]],
+    ['descend',6], ['crumbleClimb'], ['shaft'], ['doorSecret']] },
 ];
 
+const SECRET_SEGS = ['secretHill', 'secretCeil', 'startSecret', 'fakeFloor', 'crumbleDrop', 'backWall', 'pitRoom', 'doorSecret', 'dipTunnel', 'springWall', 'abyssNook', 'hollowBoulder'];
 function makeLevel(i) {
   const def = LEVELS[i], cells = new Map(), ents = [];
+  const rooms = def.segs.filter(s => SECRET_SEGS.includes(s[0])).length, roomLan = rooms === 1 ? [3] : rooms === 2 ? [1, 2] : [1, 1, 1];
   LH = def.h || 18; G = def.g0 || 14;
   const b = {
     fill(c1, c2, r1, r2, ch) { for (let r = r1; r <= r2; r++) for (let c = c1; c <= c2; c++) if (r >= 0 && r < LH) cells.set(r * 100000 + c, ch); },
@@ -255,12 +338,14 @@ function makeLevel(i) {
     ent(c, r, ch) { ents.push([c, r, ch]); },  // Objekt, das die Kachel darunter (z. B. Scheinfels) nicht ersetzt
     ground(c1, c2, top = G) { b.fill(c1, c2, top, LH - 1, '#'); },
     meta: {},
+    // Laternen in einem Geheimraum: bei 1 Raum alle 3, bei 2 Räumen erst 1, dann 2, bei 3 Räumen je 1
+    secret(spots) { const n = roomLan.shift() || 0; spots.slice(0, n).forEach(([c, r]) => b.ent(c, r, 'O')); },
   };
   let x = 0;
   for (const [name, ...args] of def.segs) x = SEG[name](b, x, ...args);
   const w = x, g = Array.from({length: LH}, () => Array(w).fill(' '));
   for (const [k, ch] of cells) { const r = Math.floor(k / 100000), c = k % 100000; if (c < w) g[r][c] = ch; }
-  const L = { def, idx: i, theme: THEMES[def.theme], w, h: LH, tiles: g, lanterns: [], enemies: [], plats: [], springs: [], spikes: [],
+  const L = { def, idx: i, theme: THEMES[def.theme], w, h: LH, tiles: g, lanterns: [], sparks: [], enemies: [], plats: [], springs: [], spikes: [],
     checks: [], crumbles: [], cmap: new Map(), fgroups: [], fmap: new Map(), occupied: new Set(), door: null, start: null,
     bossDoor: null, boss: null, arena: null, inArena: false };
   if (b.meta.arena) { const a = b.meta.arena; L.arena = {x0: a.c0 * T, x1: (a.c1 + 1) * T, y0: a.top * T, y1: a.floor * T}; }
@@ -268,7 +353,8 @@ function makeLevel(i) {
     const px = c * T, py = r * T;
     L.occupied.add(r * w + c);
     if (ch === 'P') L.start = {x: px + 7, y: py + T - 24};
-    else if (ch === 'o' || ch === 'O') L.lanterns.push({x: px + 16, y: py + 16, got: false, ph: (c * 7 + r * 3) % 6, secret: ch === 'O'});
+    else if (ch === 'O') L.lanterns.push({x: px + 16, y: py + 16, got: false, ph: (c * 7 + r * 3) % 6, secret: true});
+    else if (ch === 'o') for (const [dx, dy] of [[-11, 5], [0, 0], [11, 5]]) L.sparks.push({x: px + 16 + dx, y: py + 16 + dy, got: false, ph: (c * 5 + r + dx) % 7});
     else if (ch === 'e') L.enemies.push({sx: px + 5, sy: py + T - 16, x: px + 5, y: py + T - 16, w: 22, h: 16, vx: 0, vy: 0, dir: -1, alive: true});
     else if ('mMv'.includes(ch)) L.plats.push({ox: px, oy: py, x: px, y: py, w: 64, h: 12, axis: ch === 'v' ? 'v' : 'm', range: 96, t: ch === 'M' ? 157 : 0, dx: 0, dy: 0});
     else if (ch === 'S') L.springs.push({x: px, y: py, sq: 0});
@@ -309,12 +395,8 @@ function makeLevel(i) {
       }
     }
   }
-  // Laternen: geheime bleiben immer, die übrigen werden gleichmäßig über die Ebene ausgedünnt
   for (const s of L.lanterns) s.grp = L.fmap.get(Math.floor(s.y / T) * w + Math.floor(s.x / T)) || null;
-  const sec = L.lanterns.filter(s => s.secret), norm = L.lanterns.filter(s => !s.secret).sort((a, b) => a.x - b.x);
-  const keep = Math.max(0, Math.min(norm.length, (def.lan || 8) - sec.length)), pick = [];
-  for (let k = 0; k < keep; k++) pick.push(norm[Math.floor((k + 0.5) * norm.length / keep)]);
-  L.lanterns = [...pick, ...sec];
+  L.lanterns.sort((p, q) => p.x - q.x);   // 1., 2., 3. Laterne in der Reihenfolge der Ebene
   return L;
 }
-LEVELS.forEach((d, i) => { d.total = makeLevel(i).lanterns.length; });
+LEVELS.forEach((d, i) => { d.total = makeLevel(i).lanterns.length; });   // immer 3

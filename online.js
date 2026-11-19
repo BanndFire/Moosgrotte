@@ -180,7 +180,8 @@ $('setName').addEventListener('click', async () => {
   renderOnline(); renderSettings(); showGate('login');
 });
 
-/* Rangliste */
+/* Rangliste: zählt jede geschaffte Runde, die schnellste Zeit gewinnt */
+const scoreKey = i => LEVELS[i].id + '_7';   // neue Rangliste ab dieser Version
 let lbSeq = 0;
 function renderBoard() {
   const chips = $('lbLvl');
@@ -197,14 +198,14 @@ async function loadBoard() {
   $('lbMe').textContent = '';
   try {
     const [snap, mine] = await withTimeout(Promise.all([
-      NET.db.ref('scores/' + LEVELS[lvl].id).orderByChild(mode).startAt(1).limitToFirst(10).get(),
-      NET.db.ref(`scores/${LEVELS[lvl].id}/${NET.uid}`).get()]), 10000);
+      NET.db.ref('scores/' + scoreKey(lvl)).orderByChild(mode).startAt(1).limitToFirst(60).get(),
+      NET.db.ref(`scores/${scoreKey(lvl)}/${NET.uid}`).get()]), 10000);
     if (seq !== lbSeq) return;
     const rows = [];
-    snap.forEach(c => { rows.push({uid: c.key, ...c.val()}); });
-    rows.sort((a, b) => a[mode] - b[mode]);
+    snap.forEach(c => { const v = c.val(); if (v) rows.push({uid: c.key, ...v}); });
+    rows.sort((a, b) => a[mode] - b[mode]); rows.length = Math.min(rows.length, 10);
     body.innerHTML = '';
-    if (!rows.length) body.innerHTML = '<tr><td></td><td class="muted">Noch niemand hat hier alle Laternen geholt. Sei die oder der Erste!</td><td></td></tr>';
+    if (!rows.length) body.innerHTML = '<tr><td></td><td class="muted">Noch keine Zeiten. Sei die oder der Erste!</td><td></td></tr>';
     rows.forEach((r, i) => {
       const tr = document.createElement('tr'); if (r.uid === NET.uid) tr.className = 'me';
       const cells = [i + 1, r.name || '?', fmt(r[mode])];
@@ -212,19 +213,18 @@ async function loadBoard() {
       body.appendChild(tr);
     });
     const m = mine.val();
-    $('lbMe').textContent = m && m.f ? `Deine Bestzeit: ${fmt(m.f)}` : 'Du hast diese Ebene noch nicht mit allen Laternen geschafft.';
+    $('lbMe').textContent = m && m.f ? `Deine Bestzeit: ${fmt(m.f)}` : 'Du hast diese Ebene noch nicht geschafft.';
   } catch (e) {
     if (seq === lbSeq) body.innerHTML = '<tr><td></td><td class="muted">Rangliste konnte nicht geladen werden.</td><td></td></tr>';
   }
 }
 async function netScore(lvl, t, lan, total) {
-  // lan = Laternen aus genau diesem Durchgang (jeder Start einer Ebene zählt neu)
-  if (NET.status !== 'on' || !NET.name || lan < total) return;
+  if (NET.status !== 'on' || !NET.name) return;
   try {
-    const ref = NET.db.ref(`scores/${LEVELS[lvl].id}/${NET.uid}`), cur = (await ref.get()).val() || {};
+    const ref = NET.db.ref(`scores/${scoreKey(lvl)}/${NET.uid}`), old = (await ref.get()).val(), cur = old || {};
     const best = cur.f ? Math.min(cur.f, t) : t;
     if (best !== cur.f || cur.name !== NET.name || cur.total !== total)
-      await ref.set({name: NET.name, total, lan: total, t: best, f: best});
+      await ref.set({name: NET.name, total, lan: Math.min(lan, total), t: best, f: best});
   } catch (e) { console.warn('Zeit nicht gespeichert', e); }
 }
 

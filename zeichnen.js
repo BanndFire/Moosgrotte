@@ -431,12 +431,33 @@ function text(str, x, y, size, col, align = 'center', weight = 700, fam = FONT) 
   ctx.fillStyle = col; ctx.fillText(str, x, y);
 }
 const small = (str, x, y, size, col, align = 'center') => text(str, x, y, size, col, align, 500, BODY);
+function drawSpark(x, y, k = 1, ph = 0) {
+  // Funke: kleines leuchtendes Glutkorn
+  const p = 0.6 + 0.4 * Math.sin(tick * 0.15 + ph);
+  ctx.fillStyle = `rgba(255,170,60,${0.22 * p})`; ctx.beginPath(); ctx.arc(x, y, 8 * k, 0, 7); ctx.fill();
+  ctx.fillStyle = '#ffb547'; ctx.beginPath(); ctx.moveTo(x, y - 5 * k); ctx.lineTo(x + 3.5 * k, y); ctx.lineTo(x, y + 5 * k); ctx.lineTo(x - 3.5 * k, y); ctx.fill();
+  ctx.fillStyle = '#fff2c0'; ctx.beginPath(); ctx.moveTo(x, y - 2.5 * k); ctx.lineTo(x + 1.6 * k, y); ctx.lineTo(x, y + 2.5 * k); ctx.lineTo(x - 1.6 * k, y); ctx.fill();
+}
+function drawLanternSlots(x, y) {
+  // oben links: 3 Plätze. Noch nicht gefunden = halb durchsichtig mit gestrichelter Linie
+  for (let i = 0; i < 3; i++) {
+    const s = L.lanterns[i], got = s && s.got, cx = x + i * 30;
+    if (!got) {
+      ctx.save(); ctx.setLineDash([3, 3]); ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 1.3;
+      ctx.beginPath(); ctx.roundRect ? ctx.roundRect(cx - 12, y - 15, 24, 30, 6) : ctx.rect(cx - 12, y - 15, 24, 30); ctx.stroke(); ctx.restore();
+      ctx.globalAlpha = 0.35;
+    }
+    drawLantern(null, ctx, cx, y - 1, 0.62);
+    ctx.globalAlpha = 1;
+  }
+}
 function drawHUD() {
   const g = ctx.createLinearGradient(0, 0, 0, 46); g.addColorStop(0, 'rgba(6,4,14,.85)'); g.addColorStop(1, 'rgba(6,4,14,0)');
   ctx.fillStyle = g; ctx.fillRect(0, 0, VW, 46);
-  small(`Ebene ${li + 1} · ${L.def.name}`, 14, 18, 16, '#ffffff', 'left');
-  drawLantern(null, ctx, VW - 312, 19, 0.6);
-  small(`${lanternsNow()}/${L.lanterns.length}`, VW - 302, 18, 16, '#ffe2a3', 'left');
+  drawLanternSlots(28, 22);
+  small(`${li + 1} · ${L.def.name}`, 120, 18, 16, '#ffffff', 'left');
+  drawSpark(VW - 306, 18, 1.2);
+  small(`${sparksNow()}`, VW - 294, 18, 16, '#ffe2a3', 'left');
   small(`Stürze ${deaths}`, VW - 246, 18, 16, '#d6cbff', 'left');
   small(fmt(time), VW - 106, 18, 16, '#ffffff', 'right');
   if (muted) small('Ton aus', VW - 106, 38, 13, '#c9c0dc', 'right');
@@ -451,7 +472,7 @@ function drawHUD() {
       ctx.fillStyle = i < b.hp ? '#ff5d5d' : 'rgba(255,255,255,.18)'; ctx.fillRect(x, 74, 24, 8);
     }
   }
-  if (NET.room) small(`Gruppe ${NET.room} · ${Object.keys(NET.peers).length} dabei`, 14, 38, 13, '#cdaeff', 'left');
+  if (NET.room) small(`Gruppe ${NET.room} · ${Object.keys(NET.peers).length} dabei`, 120, 38, 13, '#cdaeff', 'left');
 }
 function panel(h) { ctx.fillStyle = 'rgba(8,5,16,.85)'; ctx.fillRect(0, VH/2 - h/2, VW, h); }
 
@@ -482,6 +503,7 @@ function render() {
   drawLight();
   // Laternen leuchten selbst und liegen deshalb über der Dunkelheit
   ctx.save(); ctx.translate(-Math.round(cam.x), -Math.round(cam.y));
+  for (const s of L.sparks) if (!s.got && Math.abs(s.x - cam.x - VW/2) < VW) drawSpark(s.x, s.y + Math.sin(tick * 0.08 + s.ph) * 2, 1, s.ph);
   for (const s of L.lanterns) if (!s.got && !lanternHidden(s) && Math.abs(s.x - cam.x - VW/2) < VW) drawLantern(s);
   drawGhosts();
   ctx.restore();
@@ -499,8 +521,7 @@ function render() {
   if (state === 'clear') {
     panel(126);
     text(L.boss ? 'BOSS BESIEGT!' : 'EBENE GESCHAFFT!', VW/2, VH/2 - 26, 36, '#a8f597');
-    small(`Laternen ${lanternsNow()}/${L.lanterns.length}   ·   Zeit ${fmt(time)}   ·   Stürze ${deaths}`, VW/2, VH/2 + 14, 17, '#ffe2a3');
-    small(`Geheimgänge ${L.fgroups.filter(f => f.found).length}/${L.fgroups.length}   ·   ` +
-      (li + 1 < LEVELS.length ? 'Der Weg zur nächsten Ebene ist frei.' : 'Alle Ebenen geschafft!'), VW/2, VH/2 + 40, 15, '#d6cbff');
+    small(`Funken ${sparksNow()}   ·   Zeit ${fmt(time)}   ·   Stürze ${deaths}`, VW/2, VH/2 + 14, 17, '#ffe2a3');
+    small((li + 1 < LEVELS.length ? 'Der Weg zur nächsten Ebene ist frei.' : 'Alle Ebenen geschafft!'), VW/2, VH/2 + 40, 15, '#d6cbff');
   }
 }

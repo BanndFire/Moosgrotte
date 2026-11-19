@@ -9,10 +9,11 @@ const N = LEVELS.length;
 const idIndex = id => LEVELS.findIndex(d => d.id === String(id));
 let save = {done: Array(N).fill(false), best: Array(N).fill(null), skin: 2, at: 0};
 try {
-  const s4 = JSON.parse(localStorage.getItem('moosgrotte-v4') || 'null');
+  const s5 = JSON.parse(localStorage.getItem('moosgrotte-v5') || 'null'), s4 = s5 || JSON.parse(localStorage.getItem('moosgrotte-v4') || 'null');
   if (s4) {
     for (const id in s4.lv || {}) { const i = idIndex(id); if (i >= 0) { save.done[i] = !!s4.lv[id].done; save.best[i] = s4.lv[id].best || null; } }
     save.skin = s4.skin ?? 2; save.at = Math.max(0, idIndex(s4.at));
+    if (!s5) save.best.forEach(b => { if (b) { b.lan = 0; b.sparks = 0; } });   // früher gab es mehr Laternen pro Ebene
   } else {
     // alte Stände hatten nur die 6 Höhlen, gezählt ab 0
     const s3 = JSON.parse(localStorage.getItem('moosgrotte-v3') || 'null'), s2 = JSON.parse(localStorage.getItem('moosgrotte-v2') || 'null'), o = s3 || s2;
@@ -26,7 +27,7 @@ try {
 function persist() {
   const lv = {};
   LEVELS.forEach((d, i) => { if (save.done[i] || save.best[i]) lv[d.id] = {done: save.done[i], best: save.best[i]}; });
-  try { localStorage.setItem('moosgrotte-v4', JSON.stringify({lv, skin: save.skin, at: (LEVELS[save.at] || LEVELS[0]).id})); } catch (e) {}
+  try { localStorage.setItem('moosgrotte-v5', JSON.stringify({lv, skin: save.skin, at: (LEVELS[save.at] || LEVELS[0]).id})); } catch (e) {}
 }
 const skin = () => SKINS[save.skin] || SKINS[2];
 
@@ -54,6 +55,7 @@ function startLevel(i) {
 }
 const lanternsNow = () => L.lanterns.filter(s => s.got).length;
 const lanternHidden = s => s.grp && !s.grp.found;
+const sparksNow = () => L.sparks.filter(s => s.got).length;
 let toastT = 0, toastMsg = '';
 function toast(msg) { toastMsg = msg; toastT = 150; }
 
@@ -324,6 +326,9 @@ function updatePlay() {
   }
   if (L.bossDoor && !L.inArena && overlap(p, L.bossDoor.x - 6, L.bossDoor.y - T + 4, 12, 2 * T - 4)) { enterArena(); return; }
   if (L.boss && L.inArena) { updateBoss(); if (state !== 'play') return; }
+  for (const s of L.sparks) if (!s.got && Math.abs(p.x + p.w/2 - s.x) < 13 && Math.abs(p.y + p.h/2 - s.y) < 17) {
+    s.got = true; tone('sine', 1200 + (tick % 5) * 90, 1700, 0.06, 0.035); burst(s.x, s.y, 4, '#ffcf6b', 1.5, 14);
+  }
   for (const s of L.lanterns) if (!s.got && Math.abs(p.x + p.w/2 - s.x) < 18 && Math.abs(p.y + p.h/2 - s.y) < 22) {
     s.got = true; sfx.lantern(); burst(s.x, s.y, 12, '#ffd27a', 2.2, 24);
   }
@@ -332,7 +337,6 @@ function updatePlay() {
   }
   if (L.door && overlap(p, L.door.x + 6, L.door.y - T + 6, 20, 58)) {
     state = 'clear'; clearT = 120; sfx.win(); burst(L.door.x + 16, L.door.y, 30, '#9cf08a', 3.5, 45);
-    if (NET.status === 'on' && NET.name) toast(lanternsNow() >= L.lanterns.length ? 'Alle Laternen! Deine Zeit zählt für die Rangliste' : 'Für die Rangliste brauchst du alle Laternen');
   }
   time++;
 }
@@ -351,12 +355,14 @@ function updateCam(snap) {
 }
 function finishLevel() {
   const lan = lanternsNow(), b = save.best[li];
-  if (!b || lan > b.lan || (lan === b.lan && time < b.time)) save.best[li] = {lan, time, deaths};
+  const sp = sparksNow();
+  if (!b || lan > b.lan || (lan === b.lan && time < b.time)) save.best[li] = {lan, time, deaths, sparks: Math.max(sp, (b && b.sparks) || 0)};
+  else b.sparks = Math.max(sp, b.sparks || 0);
   const first = !save.done[li];
   save.done[li] = true;
   persist(); netScore(li, time, lan, L.lanterns.length);
   enterWorld(li, first ? li : -1);   // beim ersten Mal erscheint der Pfad zur nächsten Ebene
-  if (first && li === LEVELS.length - 1) toast('Alle Höhlen geschafft!');
+  if (first && li === LEVELS.length - 1) toast('Alle Ebenen geschafft!');
   netPresence(true);
 }
 function update() {
